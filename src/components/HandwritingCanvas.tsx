@@ -90,8 +90,8 @@ export default function HandwritingCanvas() {
       
       <canvas
         ref={canvasRef}
-        width={280}  
-        height={280} 
+        width={350}  
+        height={350} 
         className="border-2 border-dashed border-gray-500 bg-black rounded-xl cursor-crosshair touch-none"
         
         onMouseDown={startDrawing}
