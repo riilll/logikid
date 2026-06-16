@@ -2,12 +2,24 @@
 
 import { useEffect } from "react";
 import HandwritingCanvas from "@/components/HandwritingCanvas";
-import { loadModel } from "@/lib/digitClassifier";
+import { supabase } from "@/lib/supabase";
 
 export default function Home() {
   useEffect(() => {
-    loadModel();
-  }, []);
+    const testConnection = async () => {
+    const { data, error } = await supabase
+      .from("quizzes")
+      .select("*");
+
+    console.log("DATA:", data);
+
+    if (error) {
+      console.error("ERROR:", error);
+    }
+  };
+
+  testConnection();
+}, []);
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center bg-gray-950">
