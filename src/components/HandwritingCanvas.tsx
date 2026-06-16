@@ -147,21 +147,67 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
     updatePreview();
   };
 
-  // ===== AI Preview (Resizing to 28x28) =====
+  // ===== AI Preview (Resizing and Centering to 28x28) =====
   const updatePreview = useCallback(() => {
     const canvas = canvasRef.current;
     const previewCanvas = previewCanvasRef.current;
     if (!canvas || !previewCanvas) return;
 
+    const ctx = canvas.getContext('2d');
     const pCtx = previewCanvas.getContext('2d');
-    if (!pCtx) return;
+    if (!ctx || !pCtx) return;
 
-    // Clear preview
+    // Clear preview to black
     pCtx.fillStyle = '#000000';
     pCtx.fillRect(0, 0, 28, 28);
 
-    // Draw the main canvas onto the small 28x28 canvas
-    pCtx.drawImage(canvas, 0, 0, canvas.width, canvas.height, 0, 0, 28, 28);
+    // Get pixel data from main canvas to calculate bounding box
+    const width = canvas.width;
+    const height = canvas.height;
+    const imgData = ctx.getImageData(0, 0, width, height);
+    const data = imgData.data;
+
+    let minX = width;
+    let minY = height;
+    let maxX = 0;
+    let maxY = 0;
+    let found = false;
+
+    // Scan for non-black pixels (threshold R > 20)
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const idx = (y * width + x) * 4;
+        if (data[idx] > 20) { // Red channel
+          if (x < minX) minX = x;
+          if (y < minY) minY = y;
+          if (x > maxX) maxX = x;
+          if (y > maxY) maxY = y;
+          found = true;
+        }
+      }
+    }
+
+    if (!found) {
+      // If canvas is empty, leave preview canvas black
+      return;
+    }
+
+    // Calculate dimensions of the bounding box
+    const boxW = maxX - minX + 1;
+    const boxH = maxY - minY + 1;
+
+    // Scale to fit a 20x20 area inside 28x28 canvas (MNIST style centering)
+    const maxDim = Math.max(boxW, boxH);
+    const scale = 20 / maxDim;
+    const targetW = boxW * scale;
+    const targetH = boxH * scale;
+
+    // Determine target offsets to center the box
+    const dx = (28 - targetW) / 2;
+    const dy = (28 - targetH) / 2;
+
+    // Draw centered digit onto preview canvas
+    pCtx.drawImage(canvas, minX, minY, boxW, boxH, dx, dy, targetW, targetH);
   }, []);
 
   // ===== Clear Canvas =====
@@ -184,16 +230,15 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
   const handlePredict = useCallback(async () => {
     setIsModelLoading(true);
     try {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
+      const previewCanvas = previewCanvasRef.current;
+      if (!previewCanvas) return;
 
       const model = await loadModel();
 
-      // Extract and process image tensor
+      // Extract and process image tensor from the centered 28x28 preview canvas
       const tensor = tf.tidy(() => {
         return tf.browser
-          .fromPixels(canvas, 1) // 1 channel (grayscale)
-          .resizeNearestNeighbor([28, 28])
+          .fromPixels(previewCanvas, 1) // 1 channel (grayscale) directly from preview
           .toFloat()
           .div(255.0)
           .reshape([1, 28, 28, 1]); // 4D shape for Convolutional model input
