@@ -196,7 +196,7 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
           .resizeNearestNeighbor([28, 28])
           .toFloat()
           .div(255.0)
-          .reshape([1, 784]); // Flatten for dense model input
+          .reshape([1, 28, 28, 1]); // 4D shape for Convolutional model input
       });
 
       const rawPrediction = model.predict(tensor) as tf.Tensor;
