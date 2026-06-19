@@ -5,17 +5,22 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:mobile": "npm run build && npx cap sync",
     "start": "next start",
     "lint": "eslint"
   },
   "dependencies": {
+    "@capacitor/core": "^8.4.1",
     "@supabase/supabase-js": "^2.108.2",
     "@tensorflow/tfjs": "^4.22.0",
+    "capacitor-mlkit-digitalink-plugin": "^0.4.1",
     "next": "^16.2.9",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
   },
   "devDependencies": {
+    "@capacitor/android": "^8.4.1",
+    "@capacitor/cli": "^8.4.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

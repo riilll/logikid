@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { db, ChildProfile, Quiz, QuizAttempt } from "@/lib/db";
 import HandwritingCanvas from "@/components/HandwritingCanvas";
@@ -12,7 +12,7 @@ interface CustomWindow extends Window {
 
 type GameStatus = "playing" | "success" | "retry" | "gameover" | "finished";
 
-export default function QuizPage() {
+function QuizContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
@@ -417,5 +417,13 @@ export default function QuizPage() {
         )}
       </div>
     </main>
+  );
+}
+
+export default function QuizPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-slate-950 flex items-center justify-center text-white">Memuat Kuis...</div>}>
+      <QuizContent />
+    </Suspense>
   );
 }

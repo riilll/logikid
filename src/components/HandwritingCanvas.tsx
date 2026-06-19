@@ -1,8 +1,7 @@
 'use client';
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import * as tf from "@tensorflow/tfjs";
-import { loadModel } from "@/lib/digitClassifier";
+import { DigitalInk } from 'capacitor-mlkit-digitalink-plugin';
 
 interface HandwritingCanvasProps {
   onPredict?: (digit: number) => void;
@@ -16,13 +15,37 @@ interface CustomWindow extends Window {
 
 export default function HandwritingCanvas({ onPredict, showButtons = true }: HandwritingCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const [isDrawing, setIsDrawing] = useState(false);
   const [prediction, setPrediction] = useState<number | null>(null);
   const [isModelLoading, setIsModelLoading] = useState(false);
+  const [modelDownloaded, setModelDownloaded] = useState(false);
 
-  // Initialize canvas with solid black background and white strokes
+  // Buffer untuk satu goresan (stroke) saat ini
+  const strokeRef = useRef<{ x: number[], y: number[], t: number[] }>({ x: [], y: [], t: [] });
+
+  // Inisialisasi model bahasa ML Kit (en-US sangat akurat untuk angka)
+  useEffect(() => {
+    let isMounted = true;
+    const initModel = async () => {
+      try {
+        await DigitalInk.initializePlugin();
+        await DigitalInk.downloadSingularModel({ model: 'en-US' }, (res) => {
+          if (res.done && isMounted) {
+            setModelDownloaded(true);
+            console.log("Model ML Kit Digital Ink berhasil diunduh/siap!");
+          }
+        });
+      } catch (e) {
+        console.error("Gagal menginisialisasi ML Kit", e);
+      }
+    };
+    initModel();
+
+    return () => { isMounted = false; };
+  }, []);
+
+  // Inisialisasi kanvas visual
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -30,65 +53,65 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Fill with black background initially
     ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Brush styling (thick white lines)
     ctx.strokeStyle = '#FFFFFF';
-    ctx.lineWidth = 28; // Increased from 8 to 28 for correct MNIST scale
+    ctx.lineWidth = 14; 
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
   }, []);
 
-  // Set up mouse coordinates relative to canvas
-  const getCoordinates = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const getCoordinates = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
     
-    // Calculate relative coordinates based on scale
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
     
+    let clientX, clientY;
+    if ('touches' in e) {
+      clientX = e.touches[0].clientX;
+      clientY = e.touches[0].clientY;
+    } else {
+      clientX = (e as React.MouseEvent).clientX;
+      clientY = (e as React.MouseEvent).clientY;
+    }
+
     return {
-      x: (e.clientX - rect.left) * scaleX,
-      y: (e.clientY - rect.top) * scaleY
+      x: (clientX - rect.left) * scaleX,
+      y: (clientY - rect.top) * scaleY
     };
   };
 
-  // Set up touch coordinates relative to canvas
-  const getTouchCoordinates = (e: React.TouchEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return { x: 0, y: 0 };
-    const rect = canvas.getBoundingClientRect();
-    const touch = e.touches[0];
-    
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-
-    return {
-      x: (touch.clientX - rect.left) * scaleX,
-      y: (touch.clientY - rect.top) * scaleY
-    };
+  const recordPoint = (x: number, y: number) => {
+    strokeRef.current.x.push(x);
+    strokeRef.current.y.push(y);
+    strokeRef.current.t.push(Date.now());
   };
 
-  // ===== Mouse Drawing =====
-  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    if ('preventDefault' in e && e.cancelable) e.preventDefault();
+
     const { x, y } = getCoordinates(e);
 
     ctx.beginPath();
     ctx.moveTo(x, y);
     setIsDrawing(true);
+
+    // Reset stroke buffer untuk goresan baru
+    strokeRef.current = { x: [], y: [], t: [] };
+    recordPoint(x, y);
   };
 
-  const draw = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const draw = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     if (!isDrawing) return;
 
     const canvas = canvasRef.current;
@@ -97,176 +120,89 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    if ('preventDefault' in e && e.cancelable) e.preventDefault();
+
     const { x, y } = getCoordinates(e);
 
     ctx.lineTo(x, y);
     ctx.stroke();
     
-    // Auto-update developer preview on draw
-    updatePreview();
+    recordPoint(x, y);
   };
 
-  const stopDrawing = () => {
+  const stopDrawing = async () => {
     setIsDrawing(false);
-  };
-
-  // ===== Touch Drawing =====
-  const startTouch = (e: React.TouchEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    e.preventDefault();
-
-    const { x, y } = getTouchCoordinates(e);
-
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    setIsDrawing(true);
-  };
-
-  const drawTouch = (e: React.TouchEvent<HTMLCanvasElement>) => {
-    if (!isDrawing) return;
-
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    e.preventDefault();
-
-    const { x, y } = getTouchCoordinates(e);
-
-    ctx.lineTo(x, y);
-    ctx.stroke();
     
-    // Auto-update developer preview on draw
-    updatePreview();
-  };
-
-  // ===== AI Preview (Resizing and Centering to 28x28) =====
-  const updatePreview = useCallback(() => {
-    const canvas = canvasRef.current;
-    const previewCanvas = previewCanvasRef.current;
-    if (!canvas || !previewCanvas) return;
-
-    const ctx = canvas.getContext('2d');
-    const pCtx = previewCanvas.getContext('2d');
-    if (!ctx || !pCtx) return;
-
-    // Clear preview to black
-    pCtx.fillStyle = '#000000';
-    pCtx.fillRect(0, 0, 28, 28);
-
-    // Get pixel data from main canvas to calculate bounding box
-    const width = canvas.width;
-    const height = canvas.height;
-    const imgData = ctx.getImageData(0, 0, width, height);
-    const data = imgData.data;
-
-    let minX = width;
-    let minY = height;
-    let maxX = 0;
-    let maxY = 0;
-    let found = false;
-
-    // Scan for non-black pixels (threshold R > 20)
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const idx = (y * width + x) * 4;
-        if (data[idx] > 20) { // Red channel
-          if (x < minX) minX = x;
-          if (y < minY) minY = y;
-          if (x > maxX) maxX = x;
-          if (y > maxY) maxY = y;
-          found = true;
-        }
+    // Setelah goresan selesai, kirim data goresan ke SDK ML Kit
+    if (strokeRef.current.x.length > 0) {
+      try {
+        await DigitalInk.logStrokes(strokeRef.current);
+      } catch (err) {
+        console.error("Error logging strokes to ML Kit", err);
       }
     }
+  };
 
-    if (!found) {
-      // If canvas is empty, leave preview canvas black
-      return;
-    }
-
-    // Calculate dimensions of the bounding box
-    const boxW = maxX - minX + 1;
-    const boxH = maxY - minY + 1;
-
-    // Scale to fit a 20x20 area inside 28x28 canvas (MNIST style centering)
-    const maxDim = Math.max(boxW, boxH);
-    const scale = 20 / maxDim;
-    const targetW = boxW * scale;
-    const targetH = boxH * scale;
-
-    // Determine target offsets to center the box
-    const dx = (28 - targetW) / 2;
-    const dy = (28 - targetH) / 2;
-
-    // Draw centered digit onto preview canvas
-    pCtx.drawImage(canvas, minX, minY, boxW, boxH, dx, dy, targetW, targetH);
-  }, []);
-
-  // ===== Clear Canvas =====
-  const clearCanvas = useCallback(() => {
+  const clearCanvas = useCallback(async () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Fill with black instead of clearRect (keeps background black for AI inputs)
     ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     setPrediction(null);
-    updatePreview();
-  }, [updatePreview]);
+    strokeRef.current = { x: [], y: [], t: [] };
+    
+    // Hapus memori goresan dari ML Kit Native
+    try {
+      await DigitalInk.erase();
+    } catch (err) {
+      console.error("Error erasing ML Kit memory", err);
+    }
+  }, []);
 
-  // ===== Predict =====
   const handlePredict = useCallback(async () => {
     setIsModelLoading(true);
     try {
-      const previewCanvas = previewCanvasRef.current;
-      if (!previewCanvas) return;
-
-      const model = await loadModel();
-
-      // Extract and process image tensor from the centered 28x28 preview canvas
-      const tensor = tf.tidy(() => {
-        return tf.browser
-          .fromPixels(previewCanvas, 1) // 1 channel (grayscale) directly from preview
-          .toFloat()
-          .div(255.0)
-          .reshape([1, 28, 28, 1]); // 4D shape for Convolutional model input
+      const canvas = canvasRef.current;
+      const writingArea = canvas ? { w: canvas.width, h: canvas.height } : { w: 400, h: 400 };
+      
+      const response = await DigitalInk.doRecognition({
+        model: 'en-US',
+        writingArea
       });
 
-      const rawPrediction = model.predict(tensor) as tf.Tensor;
-      const scores = rawPrediction.dataSync();
-      console.log("Probabilitas AI:", Array.from(scores).map((s, i) => `${i}: ${s.toFixed(4)}`).join(', '));
-
-      const predictedDigit = rawPrediction.argMax(1).dataSync()[0];
-
-      setPrediction(predictedDigit);
-
-      if (onPredict) {
-        onPredict(predictedDigit);
+      if (response.ok && response.results.candidates.length > 0) {
+        // Ambil hasil terbaik (kandidat pertama)
+        const bestResult = response.results.candidates[0];
+        console.log("Kandidat ML Kit:", response.results.candidates);
+        
+        // Filter hanya angka jika diperlukan
+        const match = bestResult.match(/\d/);
+        const predictedDigit = match ? parseInt(match[0], 10) : parseInt(bestResult, 10);
+        
+        if (!isNaN(predictedDigit)) {
+          setPrediction(predictedDigit);
+          if (onPredict) {
+            onPredict(predictedDigit);
+          }
+        } else {
+          alert("AI tidak mengenali angka dengan jelas. Coba lagi!");
+        }
+      } else {
+        alert("Tidak ada coretan yang dikenali!");
       }
-
-      tensor.dispose();
-      rawPrediction.dispose();
     } catch (error) {
       console.error(error);
-      alert("Gagal melakukan prediksi angka");
+      alert("Gagal melakukan prediksi dengan ML Kit");
     } finally {
       setIsModelLoading(false);
     }
   }, [onPredict]);
 
-  // Expose clear and predict to parent via window if needed for global buttons
   useEffect(() => {
     const win = window as unknown as CustomWindow;
     if (typeof window !== "undefined") {
@@ -293,12 +229,12 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
           onMouseMove={draw}
           onMouseUp={stopDrawing}
           onMouseLeave={stopDrawing}
-          onTouchStart={startTouch}
-          onTouchMove={drawTouch}
+          onTouchStart={startDrawing}
+          onTouchMove={draw}
           onTouchEnd={stopDrawing}
         />
         
-        {/* Kid Friendly Drawing Hint overlay (only when blank) */}
+        {/* Kid Friendly Drawing Hint overlay */}
         {prediction === null && !isDrawing && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none text-white/30 text-sm font-medium select-none">
             ✏️ Tulis jawaban angka di sini
@@ -318,29 +254,30 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
 
           <button
             onClick={handlePredict}
-            disabled={isModelLoading}
+            disabled={isModelLoading || !modelDownloaded}
             type="button"
-            className="py-3 px-4 bg-emerald-500 hover:bg-emerald-600 disabled:bg-emerald-800 active:scale-95 text-white font-bold rounded-xl shadow-lg shadow-emerald-500/20 transition-all cursor-pointer text-sm"
+            className="py-3 px-4 bg-emerald-500 hover:bg-emerald-600 disabled:bg-emerald-800 active:scale-95 text-white font-bold rounded-xl shadow-lg shadow-emerald-500/20 transition-all cursor-pointer text-sm flex items-center justify-center gap-2"
           >
-            {isModelLoading ? "🤖 Berpikir..." : "🔍 Kirim Jawaban"}
+            {!modelDownloaded ? (
+              <>⏳ Menyiapkan AI...</>
+            ) : isModelLoading ? (
+              <>🤖 Berpikir...</>
+            ) : (
+              <>🔍 Kirim Jawaban</>
+            )}
           </button>
         </div>
       )}
 
       {/* Playful developer preview & result card */}
       <div className="flex items-center justify-between w-full bg-black/40 rounded-2xl p-3 border border-white/5">
-        <div className="flex items-center gap-2">
-          <div className="relative w-10 h-10 bg-black border border-white/10 rounded-lg overflow-hidden flex-shrink-0">
-            <canvas
-              ref={previewCanvasRef}
-              width={28}
-              height={28}
-              className="w-full h-full image-render-pixelated"
-            />
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-indigo-500/20 rounded-xl flex items-center justify-center text-xl">
+            🧠
           </div>
           <div className="text-left">
-            <p className="text-[10px] text-white/50 font-semibold uppercase tracking-wider">Mata Robot AI</p>
-            <p className="text-xs text-white/80 font-medium">Downsampled (28x28)</p>
+            <p className="text-[10px] text-white/50 font-semibold uppercase tracking-wider">Engine</p>
+            <p className="text-xs text-white/80 font-medium">Google ML Kit Digital Ink</p>
           </div>
         </div>
 
