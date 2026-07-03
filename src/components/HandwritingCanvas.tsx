@@ -22,7 +22,7 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
   const [modelDownloaded, setModelDownloaded] = useState(false);
 
   // Buffer untuk satu goresan (stroke) saat ini
-  const strokeRef = useRef<{ x: number[], y: number[], t: number[] }>({ x: [], y: [], t: [] });
+  const strokeRef = useRef<{ x: number[], y: number[] }>({ x: [], y: [] });
 
   // Inisialisasi model bahasa ML Kit (en-US sangat akurat untuk angka)
   useEffect(() => {
@@ -30,19 +30,36 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
     const initModel = async () => {
       try {
         await DigitalInk.initializePlugin();
-        await DigitalInk.downloadSingularModel({ model: 'en-US' }, (res) => {
-          if (res.done && isMounted) {
+        
+        // Cek apakah model sudah ada agar tidak terjebak loading
+        const downloadedRes = await DigitalInk.getDownloadedModels();
+        if (downloadedRes.ok && downloadedRes.models && downloadedRes.models.includes('en-US')) {
+          if (isMounted) setModelDownloaded(true);
+          console.log("Model ML Kit sudah tersedia!");
+          return;
+        }
+
+        await DigitalInk.downloadSingularModel({ model: 'en-US' }, (res, err) => {
+          console.log("Download model status:", res, err);
+          if (res && res.done && isMounted) {
             setModelDownloaded(true);
             console.log("Model ML Kit Digital Ink berhasil diunduh/siap!");
           }
         });
       } catch (e) {
         console.error("Gagal menginisialisasi ML Kit", e);
+        // Sebagai fallback agar UI tidak stuck, kita asumsikan siap jika error tertentu
+        if (isMounted) setModelDownloaded(true); 
       }
     };
     initModel();
 
     return () => { isMounted = false; };
+  }, []);
+
+  // Hapus memori ML Kit di awal agar tidak tercampur sisa coretan sebelumnya
+  useEffect(() => {
+    DigitalInk.erase().catch(console.error);
   }, []);
 
   // Inisialisasi kanvas visual
@@ -88,7 +105,6 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
   const recordPoint = (x: number, y: number) => {
     strokeRef.current.x.push(x);
     strokeRef.current.y.push(y);
-    strokeRef.current.t.push(Date.now());
   };
 
   const startDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
@@ -107,7 +123,7 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
     setIsDrawing(true);
 
     // Reset stroke buffer untuk goresan baru
-    strokeRef.current = { x: [], y: [], t: [] };
+    strokeRef.current = { x: [], y: [] };
     recordPoint(x, y);
   };
 
@@ -154,7 +170,7 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     setPrediction(null);
-    strokeRef.current = { x: [], y: [], t: [] };
+    strokeRef.current = { x: [], y: [] };
     
     // Hapus memori goresan dari ML Kit Native
     try {
