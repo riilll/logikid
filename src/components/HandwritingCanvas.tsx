@@ -25,7 +25,7 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
   const allStrokesRef = useRef<{ x: number[], y: number[] }>({ x: [], y: [] });
   const currentStrokeRef = useRef<{ x: number[], y: number[] }>({ x: [], y: [] });
 
-  // Inisialisasi model ML Kit di background
+  // Inisialisasi model Google ML Kit Digital Ink Recognition di background
   useEffect(() => {
     let isMounted = true;
     const initModel = async () => {
@@ -40,7 +40,7 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
     return () => { isMounted = false; };
   }, []);
 
-  // Inisialisasi tampilan kanvas
+  // Inisialisasi tampilan kanvas hitam dengan kuas putih terang
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -126,6 +126,7 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
     if (!isDrawing) return;
     setIsDrawing(false);
     
+    // Kirim setiap goresan ke model Google ML Kit Digital Ink Recognition
     const strokeData = {
       x: [...currentStrokeRef.current.x],
       y: [...currentStrokeRef.current.y]
@@ -173,19 +174,47 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
     setIsModelLoading(true);
 
     try {
-      // 1. Eksekusi kilat Center-of-Mass 28x28 & Euler Topological Hole Finder secara lokal (< 3ms)
-      const localResult = recognizeDigitFromCanvasPixels(ctx, canvas.width, canvas.height);
+      let finalDigit: number | null = null;
+      let usedEngine = "";
 
-      // 2. Jalankan juga request ke Google Gemini Vision & ML Kit sebagai validasi / powerhouse
-      let finalDigit: number | null = localResult ? localResult.digit : null;
-      let usedEngine = localResult ? localResult.engine : "28x28 Center-of-Mass MNIST Engine";
+      // 1. UTAMAKAN GOOGLE ML KIT DIGITAL INK RECOGNITION (Tanpa di-bypass atau di-race terlalu cepat!)
+      // Kita beri waktu hingga 1500ms agar model Deep Learning native ML Kit menyelesaikan pembacaan dengan akurasi maksimal.
+      const mlKitPromise = new Promise<number | null>(async (resolve) => {
+        try {
+          const writingArea = { w: canvas.width, h: canvas.height };
+          const response = await DigitalInk.doRecognition({
+            model: 'en-US',
+            writingArea
+          });
 
-      // Jika hasil lokal memiliki keyakinan mutlak (misal Euler Hole Topologi 100% tepat pada angka 6, 8, 0, 9, atau 1)
-      if (localResult && localResult.confidence >= 0.98) {
-        finalDigit = localResult.digit;
-        usedEngine = localResult.engine;
+          if (response && response.results && response.results.candidates && response.results.candidates.length > 0) {
+            // Cari kandidat digit angka tunggal (0-9) dengan keyakinan tertinggi dari ML Kit
+            for (const candidate of response.results.candidates) {
+              const match = candidate.match(/^\d$/) || candidate.match(/\d/);
+              if (match) {
+                const predictedDigit = parseInt(match[0], 10);
+                if (!isNaN(predictedDigit) && predictedDigit >= 0 && predictedDigit <= 9) {
+                  resolve(predictedDigit);
+                  return;
+                }
+              }
+            }
+          }
+          resolve(null);
+        } catch {
+          resolve(null); // Berjalan di browser / plugin web fallback
+        }
+      });
+
+      const mlKitTimeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500));
+      const mlKitDigit = await Promise.race([mlKitPromise, mlKitTimeout]);
+
+      if (mlKitDigit !== null && mlKitDigit >= 0 && mlKitDigit <= 9) {
+        finalDigit = mlKitDigit;
+        usedEngine = "Google ML Kit Digital Ink Recognition";
       } else {
-        // Coba panggil Google Gemini Vision API atau ML Kit jika topologi terbuka
+        // 2. Jika Google ML Kit tidak tersedia (misal saat dibuka di Browser Web / Desktop http://localhost:3000),
+        // gunakan Google Gemini Vision API dan Center-of-Mass 28x28 MNIST Fallback
         try {
           const base64Image = canvas.toDataURL("image/png");
           const res = await fetch("/api/ai/recognize-canvas", {
@@ -195,13 +224,21 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
           });
           if (res.ok) {
             const data = await res.json();
-            if (data.success && typeof data.digit === "number") {
+            if (data.success && typeof data.digit === "number" && data.digit >= 0 && data.digit <= 9) {
               finalDigit = data.digit;
               usedEngine = data.engine || "Google Gemini 2.5 Flash Vision AI";
             }
           }
         } catch {
-          // Tetap gunakan hasil lokal
+          // Fallback lokal di bawah
+        }
+
+        if (finalDigit === null) {
+          const localResult = recognizeDigitFromCanvasPixels(ctx, canvas.width, canvas.height);
+          if (localResult) {
+            finalDigit = localResult.digit;
+            usedEngine = localResult.engine;
+          }
         }
       }
 
