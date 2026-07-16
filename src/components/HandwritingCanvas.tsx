@@ -234,8 +234,17 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
   }, [clearCanvas, handlePredict]);
 
   return (
-    <div className="flex flex-col items-center gap-4 p-5 bg-white/10 backdrop-blur-md border border-white/20 rounded-3xl shadow-2xl w-full max-w-[480px]">
-      <div className="relative w-full aspect-square bg-black rounded-2xl overflow-hidden border border-white/10 shadow-inner">
+    <div className="flex flex-col items-center gap-4 p-6 bg-gradient-to-b from-indigo-900 via-purple-900 to-slate-900 border-4 border-yellow-300 border-b-[8px] rounded-3xl shadow-2xl w-full max-w-[480px]">
+      <div className="flex items-center justify-between w-full pb-2 border-b-2 border-white/20">
+        <span className="text-xs font-black bg-yellow-400 text-slate-950 px-3 py-1 rounded-full uppercase tracking-wider flex items-center gap-1">
+          <span>🎨</span> KANVAS PINTAR AI
+        </span>
+        <span className="text-xs font-black text-yellow-300 animate-pulse">
+          ⚡ Lukis Angkamu Besar & Tebal!
+        </span>
+      </div>
+
+      <div className="relative w-full aspect-square bg-slate-950 rounded-3xl overflow-hidden border-4 border-yellow-400 shadow-inner">
         <canvas
           ref={canvasRef}
           width={400}
@@ -252,55 +261,58 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
         
         {/* Kid Friendly Drawing Hint overlay */}
         {prediction === null && !isDrawing && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none text-white/30 text-sm font-medium select-none">
-            ✏️ Tulis jawaban angka di sini
+          <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-yellow-300/40 text-base font-black select-none gap-2">
+            <span className="text-4xl animate-bounce">✍️</span>
+            <span>Tulis Angka Jawabanmu Di Sini!</span>
           </div>
         )}
       </div>
 
       {showButtons && (
-        <div className="grid grid-cols-2 gap-3 w-full">
+        <div className="grid grid-cols-2 gap-4 w-full mt-1">
           <button
             onClick={clearCanvas}
             type="button"
-            className="py-3 px-4 bg-rose-500/20 hover:bg-rose-500/30 active:scale-95 text-rose-300 font-bold rounded-xl border border-rose-500/30 transition-all cursor-pointer text-sm"
+            className="py-3.5 px-4 bg-rose-500 hover:bg-rose-400 active:scale-95 text-white font-black rounded-2xl border-4 border-white border-b-[6px] shadow-lg transition-all cursor-pointer text-sm flex items-center justify-center gap-2"
           >
-            🧹 Hapus Coretan
+            <span>🧹</span> Hapus Ulang
           </button>
 
           <button
             onClick={handlePredict}
             disabled={isModelLoading || !modelDownloaded}
             type="button"
-            className="py-3 px-4 bg-emerald-500 hover:bg-emerald-600 disabled:bg-emerald-800 active:scale-95 text-white font-bold rounded-xl shadow-lg shadow-emerald-500/20 transition-all cursor-pointer text-sm flex items-center justify-center gap-2"
+            className="py-3.5 px-4 bg-emerald-500 hover:bg-emerald-400 disabled:bg-emerald-800 active:scale-95 text-white font-black rounded-2xl border-4 border-white border-b-[6px] shadow-lg transition-all cursor-pointer text-sm flex items-center justify-center gap-2"
           >
             {!modelDownloaded ? (
               <>⏳ Menyiapkan AI...</>
             ) : isModelLoading ? (
               <>🤖 Berpikir...</>
             ) : (
-              <>🔍 Kirim Jawaban</>
+              <>
+                <span>✨</span> Kirim Jawaban!
+              </>
             )}
           </button>
         </div>
       )}
 
-      {/* Playful developer preview & result card */}
-      <div className="flex items-center justify-between w-full bg-black/40 rounded-2xl p-3 border border-white/5">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-indigo-500/20 rounded-xl flex items-center justify-center text-xl">
-            🧠
+      {/* Playful AI Status Card */}
+      <div className="flex items-center justify-between w-full bg-slate-950/80 rounded-2xl p-3 border-2 border-white/15">
+        <div className="flex items-center gap-2">
+          <div className="w-9 h-9 bg-yellow-400 text-slate-950 rounded-xl flex items-center justify-center text-lg font-black">
+            🤖
           </div>
           <div className="text-left">
-            <p className="text-[10px] text-white/50 font-semibold uppercase tracking-wider">Engine</p>
-            <p className="text-xs text-white/80 font-medium">Google ML Kit Digital Ink</p>
+            <p className="text-[10px] text-yellow-300 font-black uppercase tracking-wider">Detektor Angka</p>
+            <p className="text-xs text-white font-bold">ML Kit Digital Ink</p>
           </div>
         </div>
 
         {prediction !== null && (
-          <div className="flex items-center gap-2 bg-white/10 px-3 py-1 rounded-xl border border-white/10">
-            <span className="text-xs text-white/60">AI Membaca:</span>
-            <span className="text-xl font-black text-amber-400">{prediction}</span>
+          <div className="flex items-center gap-2 bg-yellow-400 px-3 py-1.5 rounded-xl border-2 border-white text-slate-950 font-black shadow-sm animate-bounce">
+            <span className="text-xs">AI Membaca:</span>
+            <span className="text-2xl">{prediction}</span>
           </div>
         )}
       </div>

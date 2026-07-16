@@ -1,4 +1,3 @@
-
 export interface User {
   id: string;
   nama: string;
@@ -14,6 +13,7 @@ export interface ChildProfile {
   kelas: string;
   theme: 'space' | 'jungle' | 'ocean';
   avatar: string; // e.g. "🐱", "🐶", "🦊", "🦁", "🐼", "🤖"
+  preferred_level?: 'mudah' | 'sedang' | 'sukar' | 'semua'; // Tingkat kesulitan soal yang dipilih orang tua
   created_at: string;
 }
 
@@ -25,6 +25,9 @@ export interface Quiz {
   level: 'mudah' | 'sedang' | 'sukar';
   created_at: string;
   visual_helper?: string; // Used to store emojis like "🍎🍎🍎" for visual counting
+  is_active?: boolean; // Apakah soal aktif diberikan kepada anak
+  status?: 'approved' | 'pending' | 'rejected'; // Validasi oleh orang tua
+  created_by?: 'system' | 'parent' | 'ai'; // Sumber pembuatan soal
 }
 
 export interface QuizAttempt {
@@ -63,6 +66,7 @@ const DEFAULT_CHILDREN: ChildProfile[] = [
     kelas: "Kelas 1",
     theme: "space",
     avatar: "🐻",
+    preferred_level: "mudah",
     created_at: new Date().toISOString(),
   },
   {
@@ -73,18 +77,22 @@ const DEFAULT_CHILDREN: ChildProfile[] = [
     kelas: "Kelas 3",
     theme: "jungle",
     avatar: "🦊",
+    preferred_level: "sedang",
     created_at: new Date().toISOString(),
   }
 ];
 
 const DEFAULT_QUIZZES: Quiz[] = [
-  // Game Menghitung (Penjumlahan)
+  // Game Menghitung (Penjumlahan & Pengurangan - Mudah)
   {
     id: "quiz-math-1",
     pertanyaan: "5 + 3",
     jawaban: "8",
     kategori: "penjumlahan",
     level: "mudah",
+    is_active: true,
+    status: "approved",
+    created_by: "system",
     created_at: new Date().toISOString(),
   },
   {
@@ -93,6 +101,9 @@ const DEFAULT_QUIZZES: Quiz[] = [
     jawaban: "9",
     kategori: "penjumlahan",
     level: "mudah",
+    is_active: true,
+    status: "approved",
+    created_by: "system",
     created_at: new Date().toISOString(),
   },
   {
@@ -101,6 +112,9 @@ const DEFAULT_QUIZZES: Quiz[] = [
     jawaban: "7",
     kategori: "penjumlahan",
     level: "mudah",
+    is_active: true,
+    status: "approved",
+    created_by: "system",
     created_at: new Date().toISOString(),
   },
   {
@@ -109,6 +123,9 @@ const DEFAULT_QUIZZES: Quiz[] = [
     jawaban: "4",
     kategori: "penjumlahan",
     level: "mudah",
+    is_active: true,
+    status: "approved",
+    created_by: "system",
     created_at: new Date().toISOString(),
   },
   {
@@ -117,6 +134,134 @@ const DEFAULT_QUIZZES: Quiz[] = [
     jawaban: "5",
     kategori: "penjumlahan",
     level: "mudah",
+    is_active: true,
+    status: "approved",
+    created_by: "system",
+    created_at: new Date().toISOString(),
+  },
+  // Penjumlahan & Pengurangan (Sedang)
+  {
+    id: "quiz-math-6",
+    pertanyaan: "14 + 15",
+    jawaban: "29",
+    kategori: "penjumlahan",
+    level: "sedang",
+    is_active: true,
+    status: "approved",
+    created_by: "system",
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: "quiz-math-7",
+    pertanyaan: "28 - 12",
+    jawaban: "16",
+    kategori: "penjumlahan",
+    level: "sedang",
+    is_active: true,
+    status: "approved",
+    created_by: "system",
+    created_at: new Date().toISOString(),
+  },
+  // Penjumlahan & Pengurangan (Sukar)
+  {
+    id: "quiz-math-8",
+    pertanyaan: "65 + 28",
+    jawaban: "93",
+    kategori: "penjumlahan",
+    level: "sukar",
+    is_active: true,
+    status: "approved",
+    created_by: "system",
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: "quiz-math-9",
+    pertanyaan: "84 - 37",
+    jawaban: "47",
+    kategori: "penjumlahan",
+    level: "sukar",
+    is_active: true,
+    status: "approved",
+    created_by: "system",
+    created_at: new Date().toISOString(),
+  },
+
+  // Game Perkalian
+  {
+    id: "quiz-mul-1",
+    pertanyaan: "2 x 3",
+    jawaban: "6",
+    kategori: "perkalian",
+    level: "mudah",
+    is_active: true,
+    status: "approved",
+    created_by: "system",
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: "quiz-mul-2",
+    pertanyaan: "4 x 2",
+    jawaban: "8",
+    kategori: "perkalian",
+    level: "mudah",
+    is_active: true,
+    status: "approved",
+    created_by: "system",
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: "quiz-mul-3",
+    pertanyaan: "3 x 3",
+    jawaban: "9",
+    kategori: "perkalian",
+    level: "mudah",
+    is_active: true,
+    status: "approved",
+    created_by: "system",
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: "quiz-mul-4",
+    pertanyaan: "6 x 7",
+    jawaban: "42",
+    kategori: "perkalian",
+    level: "sedang",
+    is_active: true,
+    status: "approved",
+    created_by: "system",
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: "quiz-mul-5",
+    pertanyaan: "8 x 5",
+    jawaban: "40",
+    kategori: "perkalian",
+    level: "sedang",
+    is_active: true,
+    status: "approved",
+    created_by: "system",
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: "quiz-mul-6",
+    pertanyaan: "9 x 8",
+    jawaban: "72",
+    kategori: "perkalian",
+    level: "sukar",
+    is_active: true,
+    status: "approved",
+    created_by: "system",
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: "quiz-mul-7",
+    pertanyaan: "12 x 6",
+    jawaban: "72",
+    kategori: "perkalian",
+    level: "sukar",
+    is_active: true,
+    status: "approved",
+    created_by: "system",
     created_at: new Date().toISOString(),
   },
 
@@ -128,6 +273,9 @@ const DEFAULT_QUIZZES: Quiz[] = [
     kategori: "visual",
     level: "mudah",
     visual_helper: "⭐️⭐️⭐️⭐️⭐️",
+    is_active: true,
+    status: "approved",
+    created_by: "system",
     created_at: new Date().toISOString(),
   },
   {
@@ -137,6 +285,9 @@ const DEFAULT_QUIZZES: Quiz[] = [
     kategori: "visual",
     level: "mudah",
     visual_helper: "🍎🍎🍎",
+    is_active: true,
+    status: "approved",
+    created_by: "system",
     created_at: new Date().toISOString(),
   },
   {
@@ -146,6 +297,9 @@ const DEFAULT_QUIZZES: Quiz[] = [
     kategori: "visual",
     level: "mudah",
     visual_helper: "🥕🥕🥕🥕🥕🥕",
+    is_active: true,
+    status: "approved",
+    created_by: "system",
     created_at: new Date().toISOString(),
   },
   {
@@ -155,6 +309,33 @@ const DEFAULT_QUIZZES: Quiz[] = [
     kategori: "visual",
     level: "mudah",
     visual_helper: "🐠🐠🐠🐠",
+    is_active: true,
+    status: "approved",
+    created_by: "system",
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: "quiz-visual-5",
+    pertanyaan: "Berapa jumlah stroberi manis yang tertera?",
+    jawaban: "7",
+    kategori: "visual",
+    level: "sedang",
+    visual_helper: "🍓🍓🍓🍓🍓🍓🍓",
+    is_active: true,
+    status: "approved",
+    created_by: "system",
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: "quiz-visual-6",
+    pertanyaan: "Hitung total bola sepak berikut:",
+    jawaban: "8",
+    kategori: "visual",
+    level: "sukar",
+    visual_helper: "⚽️⚽️⚽️⚽️⚽️⚽️⚽️⚽️",
+    is_active: true,
+    status: "approved",
+    created_by: "system",
     created_at: new Date().toISOString(),
   },
 
@@ -164,7 +345,10 @@ const DEFAULT_QUIZZES: Quiz[] = [
     pertanyaan: "Dodi memiliki 4 buah permen manis. Ibu kemudian memberikan Dodi 3 permen manis lagi. Berapa total permen manis Dodi sekarang?",
     jawaban: "7",
     kategori: "soal_cerita",
-    level: "sedang",
+    level: "mudah",
+    is_active: true,
+    status: "approved",
+    created_by: "system",
     created_at: new Date().toISOString(),
   },
   {
@@ -172,23 +356,43 @@ const DEFAULT_QUIZZES: Quiz[] = [
     pertanyaan: "Tania mempunyai 9 buah kue mangkok cokelat di atas piring. Dia memakan 5 buah kue. Berapakah sisa kue mangkok Tania sekarang?",
     jawaban: "4",
     kategori: "soal_cerita",
-    level: "sedang",
+    level: "mudah",
+    is_active: true,
+    status: "approved",
+    created_by: "system",
     created_at: new Date().toISOString(),
   },
   {
     id: "quiz-story-3",
-    pertanyaan: "Raka memetik 2 buah mangga matang di pagi hari, lalu ia memetik 6 buah mangga matang di sore hari. Berapa total buah mangga yang dipetik Raka hari ini?",
-    jawaban: "8",
+    pertanyaan: "Raka memetik 12 buah mangga matang di pagi hari, lalu ia memetik 15 buah mangga di sore hari. Berapa total mangga yang dipetik Raka hari ini?",
+    jawaban: "27",
     kategori: "soal_cerita",
     level: "sedang",
+    is_active: true,
+    status: "approved",
+    created_by: "system",
     created_at: new Date().toISOString(),
   },
   {
     id: "quiz-story-4",
-    pertanyaan: "Di atas pohon kelapa ada 6 ekor monyet lucu. Tiba-tiba, 4 ekor monyet turun ke tanah untuk makan buah pisang. Berapakah sisa monyet yang berada di atas pohon?",
-    jawaban: "2",
+    pertanyaan: "Di atas pohon ada 16 ekor monyet lucu. Tiba-tiba, 7 ekor monyet turun ke tanah untuk makan pisang. Berapakah sisa monyet di atas pohon?",
+    jawaban: "9",
     kategori: "soal_cerita",
     level: "sedang",
+    is_active: true,
+    status: "approved",
+    created_by: "system",
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: "quiz-story-5",
+    pertanyaan: "Ibu membeli 5 kotak pensil warna. Setiap kotak berisi 8 batang pensil. Berapakah total batang pensil warna yang dibeli Ibu?",
+    jawaban: "40",
+    kategori: "soal_cerita",
+    level: "sukar",
+    is_active: true,
+    status: "approved",
+    created_by: "system",
     created_at: new Date().toISOString(),
   }
 ];
@@ -213,7 +417,6 @@ const DEFAULT_REWARDS: Reward[] = [
 ];
 
 const DEFAULT_ATTEMPTS: QuizAttempt[] = [
-  // Sample attempts for Aria (Bear) over last 3 days
   {
     id: "attempt-1",
     child_id: "child-bear-1111-2222",
@@ -221,7 +424,7 @@ const DEFAULT_ATTEMPTS: QuizAttempt[] = [
     jawaban_anak: "8",
     jawaban_benar: "8",
     is_correct: true,
-    created_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(), // 2 days ago
+    created_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
   },
   {
     id: "attempt-2",
@@ -230,7 +433,7 @@ const DEFAULT_ATTEMPTS: QuizAttempt[] = [
     jawaban_anak: "9",
     jawaban_benar: "9",
     is_correct: true,
-    created_at: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(), // 1 day ago
+    created_at: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
   },
   {
     id: "attempt-3",
@@ -239,7 +442,7 @@ const DEFAULT_ATTEMPTS: QuizAttempt[] = [
     jawaban_anak: "4",
     jawaban_benar: "5",
     is_correct: false,
-    created_at: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(), // 1 day ago
+    created_at: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
   },
   {
     id: "attempt-4",
@@ -248,7 +451,7 @@ const DEFAULT_ATTEMPTS: QuizAttempt[] = [
     jawaban_anak: "3",
     jawaban_benar: "3",
     is_correct: true,
-    created_at: new Date().toISOString(), // today
+    created_at: new Date().toISOString(),
   }
 ];
 
@@ -273,6 +476,25 @@ class MockDatabase {
     }
     if (!localStorage.getItem("logikid_quizzes")) {
       localStorage.setItem("logikid_quizzes", JSON.stringify(DEFAULT_QUIZZES));
+    } else {
+      // Migrate existing quizzes to ensure they have status & is_active & created_by fields
+      const existingQuizzes: Quiz[] = JSON.parse(localStorage.getItem("logikid_quizzes") || "[]");
+      let updated = false;
+      const migrated = existingQuizzes.map(q => {
+        if (q.is_active === undefined || q.status === undefined || q.created_by === undefined) {
+          updated = true;
+          return {
+            ...q,
+            is_active: q.is_active !== undefined ? q.is_active : true,
+            status: q.status || "approved",
+            created_by: q.created_by || "system"
+          };
+        }
+        return q;
+      });
+      if (updated) {
+        localStorage.setItem("logikid_quizzes", JSON.stringify(migrated));
+      }
     }
     if (!localStorage.getItem("logikid_attempts")) {
       localStorage.setItem("logikid_attempts", JSON.stringify(DEFAULT_ATTEMPTS));
@@ -326,6 +548,7 @@ class MockDatabase {
       kelas,
       avatar,
       theme,
+      preferred_level: "mudah",
       created_at: new Date().toISOString(),
     };
     children.push(newChild);
@@ -353,6 +576,27 @@ class MockDatabase {
     if (index !== -1) {
       children[index].theme = theme;
       this.setData("logikid_children", children);
+      // Update active child session if matching
+      const activeChild = this.getActiveChild();
+      if (activeChild && activeChild.id === childId) {
+        this.setActiveChild(children[index].id);
+      }
+    }
+  }
+
+  updateChildDifficulty(childId: string, preferred_level: 'mudah' | 'sedang' | 'sukar' | 'semua'): void {
+    const children = this.getData<ChildProfile>("logikid_children");
+    const index = children.findIndex((c) => c.id === childId);
+    if (index !== -1) {
+      children[index].preferred_level = preferred_level;
+      this.setData("logikid_children", children);
+      // Update active child session if matching
+      if (typeof window !== "undefined") {
+        const activeId = localStorage.getItem("logikid_active_child_id");
+        if (activeId === childId) {
+          localStorage.setItem("logikid_active_child_data", JSON.stringify(children[index]));
+        }
+      }
     }
   }
 
@@ -364,6 +608,110 @@ class MockDatabase {
   getQuizzesByCategory(category: string): Quiz[] {
     const quizzes = this.getQuizzes();
     return quizzes.filter((q) => q.kategori === category);
+  }
+
+  getQuizzesByChildFilter(category: string, childId?: string): Quiz[] {
+    const quizzes = this.getQuizzes();
+    // Only return active and approved questions for child gameplay
+    let filtered = quizzes.filter(
+      (q) => q.kategori === category && q.is_active !== false && (q.status === "approved" || !q.status)
+    );
+
+    if (childId) {
+      const child = this.getChildById(childId);
+      if (child && child.preferred_level && child.preferred_level !== "semua") {
+        const levelFiltered = filtered.filter((q) => q.level === child.preferred_level);
+        if (levelFiltered.length > 0) {
+          filtered = levelFiltered;
+        }
+      }
+    }
+
+    return filtered;
+  }
+
+  addQuiz(
+    pertanyaan: string,
+    jawaban: string,
+    kategori: Quiz['kategori'],
+    level: Quiz['level'],
+    visual_helper?: string,
+    status: Quiz['status'] = 'approved',
+    created_by: Quiz['created_by'] = 'parent'
+  ): Quiz {
+    const quizzes = this.getQuizzes();
+    const newQuiz: Quiz = {
+      id: "quiz-" + Math.random().toString(36).substr(2, 9),
+      pertanyaan,
+      jawaban,
+      kategori,
+      level,
+      visual_helper,
+      is_active: status === 'approved',
+      status,
+      created_by,
+      created_at: new Date().toISOString(),
+    };
+    quizzes.push(newQuiz);
+    this.setData("logikid_quizzes", quizzes);
+    return newQuiz;
+  }
+
+  addMultipleQuizzes(quizzesToAdd: Partial<Quiz>[]): Quiz[] {
+    const quizzes = this.getQuizzes();
+    const created: Quiz[] = [];
+    for (const item of quizzesToAdd) {
+      const newQ: Quiz = {
+        id: item.id || "quiz-ai-" + Math.random().toString(36).substr(2, 9),
+        pertanyaan: item.pertanyaan || "",
+        jawaban: item.jawaban || "1",
+        kategori: item.kategori || "penjumlahan",
+        level: item.level || "mudah",
+        visual_helper: item.visual_helper,
+        is_active: item.is_active !== undefined ? item.is_active : (item.status === "approved"),
+        status: item.status || "approved",
+        created_by: item.created_by || "ai",
+        created_at: new Date().toISOString(),
+      };
+      quizzes.push(newQ);
+      created.push(newQ);
+    }
+    this.setData("logikid_quizzes", quizzes);
+    return created;
+  }
+
+  updateQuiz(quizId: string, updates: Partial<Quiz>): void {
+    const quizzes = this.getQuizzes();
+    const index = quizzes.findIndex((q) => q.id === quizId);
+    if (index !== -1) {
+      quizzes[index] = { ...quizzes[index], ...updates };
+      this.setData("logikid_quizzes", quizzes);
+    }
+  }
+
+  deleteQuiz(quizId: string): void {
+    const quizzes = this.getQuizzes();
+    const filtered = quizzes.filter((q) => q.id !== quizId);
+    this.setData("logikid_quizzes", filtered);
+  }
+
+  toggleQuizStatus(quizId: string, status: 'approved' | 'pending' | 'rejected'): void {
+    const quizzes = this.getQuizzes();
+    const index = quizzes.findIndex((q) => q.id === quizId);
+    if (index !== -1) {
+      quizzes[index].status = status;
+      quizzes[index].is_active = status === "approved";
+      this.setData("logikid_quizzes", quizzes);
+    }
+  }
+
+  toggleQuizActive(quizId: string, isActive: boolean): void {
+    const quizzes = this.getQuizzes();
+    const index = quizzes.findIndex((q) => q.id === quizId);
+    if (index !== -1) {
+      quizzes[index].is_active = isActive;
+      this.setData("logikid_quizzes", quizzes);
+    }
   }
 
   // Quiz Attempts
@@ -396,6 +744,12 @@ class MockDatabase {
     return newAttempt;
   }
 
+  deleteAttempt(attemptId: string): void {
+    const attempts = this.getData<QuizAttempt>("logikid_attempts");
+    const filtered = attempts.filter((a) => a.id !== attemptId);
+    this.setData("logikid_attempts", filtered);
+  }
+
   // Rewards
   getRewardByChildId(childId: string): Reward | null {
     const rewards = this.getData<Reward>("logikid_rewards");
@@ -410,7 +764,6 @@ class MockDatabase {
       reward.total_poin += points;
       reward.streak += 1;
       
-      // Calculate level based on points (e.g. 50 points per level)
       const calculatedLevel = Math.max(1, Math.floor(reward.total_poin / 50) + 1);
       reward.level = calculatedLevel;
       reward.updated_at = new Date().toISOString();
