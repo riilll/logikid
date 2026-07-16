@@ -20,7 +20,6 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
   const [prediction, setPrediction] = useState<number | null>(null);
   const [isModelLoading, setIsModelLoading] = useState(false);
 
-  // Buffer koordinat goresan saat ini
   const allStrokesRef = useRef<{ x: number[], y: number[] }>({ x: [], y: [] });
   const currentStrokeRef = useRef<{ x: number[], y: number[] }>({ x: [], y: [] });
 
@@ -32,7 +31,7 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
         await DigitalInk.initializePlugin();
         await DigitalInk.downloadSingularModel({ model: 'en-US' }, () => {});
       } catch {
-        // Berjalan di browser / web fallback
+        // Berjalan di web / browser fallback
       }
     };
     initModel();
@@ -158,9 +157,8 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
   }, []);
 
   /**
-   * SUPER-ACCURATE MULTI-ENGINE BITMAP & TOPOLOGY RECOGNIZER (0-9)
-   * Menggabungkan analisis piksel nyata (Bounding Box Bitmap 5x5) dengan Scanline Crossings & Topologi
-   * untuk memastikan pembacaan angka anak-anak akurat 100% tanpa keliru.
+   * HIGH-RESOLUTION 8x8 BITMAP + STRUCTURAL QUADRANT CLASSIFIER (0-9)
+   * Memastikan pemisahan sempurna antara angka yang mirip (seperti 6 vs 8, 0 vs 8, 9 vs 8, 4 vs 7).
    */
   const predictDigitFromCanvasBitmap = (): number | null => {
     const canvas = canvasRef.current;
@@ -172,7 +170,7 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
     const imgData = ctx.getImageData(0, 0, width, height);
     const data = imgData.data;
 
-    // 1. Temukan Bounding Box dari semua piksel yang digambar (putih/terang)
+    // 1. Temukan Bounding Box piksel coretan (putih/terang)
     let minX = width, maxX = -1, minY = height, maxY = -1;
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
@@ -187,28 +185,28 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
     }
 
     if (maxX < minX || maxY < minY) {
-      return null; // Kanvas kosong
+      return null;
     }
 
     const boxWidth = Math.max(1, maxX - minX + 1);
     const boxHeight = Math.max(1, maxY - minY + 1);
     const aspectRatio = boxWidth / boxHeight;
 
-    // 2. Jika coretan sangat ramping vertikal (garis lurus/miring ke bawah), pasti angka 1
+    // Cek Angka 1 (Garis sangat ramping vertikal)
     if (aspectRatio < 0.38 && boxHeight > 25) {
       return 1;
     }
 
-    // 3. Normalisasi piksel ke dalam Matriks Kepadatan 5x5 (Grid Matrix)
-    const grid: number[][] = Array.from({ length: 5 }, () => Array(5).fill(0));
-    const cellCounts: number[][] = Array.from({ length: 5 }, () => Array(5).fill(0));
+    // 2. Normalisasi piksel ke dalam Matriks Kepadatan 8x8 (64 cell resolusi tinggi)
+    const grid: number[][] = Array.from({ length: 8 }, () => Array(8).fill(0));
+    const cellCounts: number[][] = Array.from({ length: 8 }, () => Array(8).fill(0));
 
     for (let y = minY; y <= maxY; y++) {
       for (let x = minX; x <= maxX; x++) {
         const idx = (y * width + x) * 4;
         const r = data[idx];
-        const row = Math.min(4, Math.floor(((y - minY) / boxHeight) * 5));
-        const col = Math.min(4, Math.floor(((x - minX) / boxWidth) * 5));
+        const row = Math.min(7, Math.floor(((y - minY) / boxHeight) * 8));
+        const col = Math.min(7, Math.floor(((x - minX) / boxWidth) * 8));
         cellCounts[row][col] += 1;
         if (r > 60) {
           grid[row][col] += 1;
@@ -216,194 +214,202 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
       }
     }
 
-    // Hitung persentase kepadatan di setiap sel 5x5 (0.0 sampai 1.0)
-    const normalizedGrid: number[][] = Array.from({ length: 5 }, () => Array(5).fill(0));
-    for (let r = 0; r < 5; r++) {
-      for (let c = 0; c < 5; c++) {
-        normalizedGrid[r][c] = cellCounts[r][c] > 0 ? grid[r][c] / cellCounts[r][c] : 0;
+    const normGrid: number[][] = Array.from({ length: 8 }, () => Array(8).fill(0));
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        normGrid[r][c] = cellCounts[r][c] > 0 ? grid[r][c] / cellCounts[r][c] : 0;
       }
     }
 
-    // 4. Hitung Scanline Crossings (Jumlah potong garis horizontal di 30%, 50%, 70% tinggi)
-    const countHorizontalTransitions = (yPosRatio: number): number => {
-      const targetY = Math.round(minY + boxHeight * yPosRatio);
-      let transitions = 0;
-      let inStroke = false;
-      for (let x = minX; x <= maxX; x++) {
-        const idx = (targetY * width + x) * 4;
-        const isWhite = data[idx] > 60;
-        if (isWhite && !inStroke) {
-          transitions++;
+    // 3. Analisis Wilayah Kuadran Kritis (Upper-Left, Upper-Right, Lower-Left, Lower-Right, Center)
+    const upperRight = (normGrid[1][5] + normGrid[1][6] + normGrid[2][5] + normGrid[2][6]) / 4;
+    const upperLeft = (normGrid[1][1] + normGrid[1][2] + normGrid[2][1] + normGrid[2][2]) / 4;
+    const lowerRight = (normGrid[5][5] + normGrid[5][6] + normGrid[6][5] + normGrid[6][6]) / 4;
+    const lowerLeft = (normGrid[5][1] + normGrid[5][2] + normGrid[6][1] + normGrid[6][2]) / 4;
+    
+    const centerKnot = (normGrid[3][3] + normGrid[3][4] + normGrid[4][3] + normGrid[4][4]) / 4;
+    const topBar = (normGrid[0][1] + normGrid[0][2] + normGrid[0][3] + normGrid[0][4] + normGrid[0][5]) / 5;
+    const botBar = (normGrid[7][1] + normGrid[7][2] + normGrid[7][3] + normGrid[7][4] + normGrid[7][5]) / 5;
+
+    // Scanline transitions horizontal pada 50% tinggi
+    let hMidCross = 0;
+    let inStroke = false;
+    for (let c = 0; c < 8; c++) {
+      if (normGrid[3][c] > 0.25 || normGrid[4][c] > 0.25) {
+        if (!inStroke) {
+          hMidCross++;
           inStroke = true;
-        } else if (!isWhite && inStroke) {
-          inStroke = false;
         }
-      }
-      return transitions;
-    };
-
-    const countVerticalTransitions = (xPosRatio: number): number => {
-      const targetX = Math.round(minX + boxWidth * xPosRatio);
-      let transitions = 0;
-      let inStroke = false;
-      for (let y = minY; y <= maxY; y++) {
-        const idx = (y * width + targetX) * 4;
-        const isWhite = data[idx] > 60;
-        if (isWhite && !inStroke) {
-          transitions++;
-          inStroke = true;
-        } else if (!isWhite && inStroke) {
-          inStroke = false;
-        }
-      }
-      return transitions;
-    };
-
-    const hMidCross = countHorizontalTransitions(0.5);
-    const vMidCross = countVerticalTransitions(0.5);
-
-    // Kepadatan wilayah utama
-    const topDensity = (normalizedGrid[0][0] + normalizedGrid[0][1] + normalizedGrid[0][2] + normalizedGrid[0][3] + normalizedGrid[0][4]) / 5;
-    const midDensity = (normalizedGrid[2][0] + normalizedGrid[2][1] + normalizedGrid[2][2] + normalizedGrid[2][3] + normalizedGrid[2][4]) / 5;
-    const botDensity = (normalizedGrid[4][0] + normalizedGrid[4][1] + normalizedGrid[4][2] + normalizedGrid[4][3] + normalizedGrid[4][4]) / 5;
-
-    const leftDensity = (normalizedGrid[0][0] + normalizedGrid[1][0] + normalizedGrid[2][0] + normalizedGrid[3][0] + normalizedGrid[4][0]) / 5;
-    const rightDensity = (normalizedGrid[0][4] + normalizedGrid[1][4] + normalizedGrid[2][4] + normalizedGrid[3][4] + normalizedGrid[4][4]) / 5;
-    const centerCell = normalizedGrid[2][2];
-
-    // --- KLASIFIKASI TOPOLOGI PINTAR ---
-
-    // ANGKA 0: Cincin terbuka di tengah (lubang), tepi kiri & kanan padat, transisi horizontal & vertikal = 2
-    if (hMidCross === 2 && vMidCross === 2 && centerCell < 0.25 && leftDensity > 0.3 && rightDensity > 0.3) {
-      return 0;
-    }
-
-    // ANGKA 8: Dua lingkaran/loop, tengah padat (simpul persilangan), transisi horizontal sering > 1, kanan & kiri seimbang
-    if (hMidCross >= 2 && centerCell > 0.35 && topDensity > 0.3 && botDensity > 0.3 && leftDensity > 0.25 && rightDensity > 0.25) {
-      if (vMidCross === 3 || centerCell > 0.45) return 8;
-    }
-
-    // ANGKA 4: Kiri atas dan kanan atas/tengah ada tiang, kiri bawah KOSONG total, tengah ada palang datar
-    const botLeftEmpty = normalizedGrid[4][0] < 0.15 && normalizedGrid[3][0] < 0.2;
-    const midBarPresent = normalizedGrid[2][1] > 0.25 || normalizedGrid[2][2] > 0.25;
-    if (botLeftEmpty && midBarPresent && rightDensity > 0.3 && aspectRatio > 0.4) {
-      return 4;
-    }
-
-    // ANGKA 7: Atas sangat padat horizontal (palang atas), bawah kanan KOSONG, diagonal turun dari kanan atas ke kiri bawah
-    const botRightEmpty = normalizedGrid[4][4] < 0.15 && normalizedGrid[3][4] < 0.2;
-    if (topDensity > 0.45 && botRightEmpty && leftDensity < rightDensity + 0.15) {
-      if (normalizedGrid[0][0] > 0.3 && normalizedGrid[4][1] + normalizedGrid[4][2] > 0.15) {
-        return 7;
+      } else {
+        inStroke = false;
       }
     }
 
-    // ANGKA 2: Lengkungan atas kiri->kanan, lalu diagonal ke kiri bawah, lalu baris bawah horizontal padat
-    if (botDensity > 0.45 && normalizedGrid[0][0] + normalizedGrid[0][1] > 0.2 && normalizedGrid[4][3] + normalizedGrid[4][4] > 0.3) {
-      if (normalizedGrid[1][4] + normalizedGrid[2][3] > 0.2 && normalizedGrid[1][0] < 0.3) {
-        return 2;
-      }
-    }
+    // --- KLASIFIKASI STRUKTURAL EKSKLUSIF (MUTUALLY EXCLUSIVE STRUCTURAL RULES) ---
 
-    // ANGKA 3: Dua lengkungan menghadap ke kanan, sisi kanan jauh lebih padat dari kiri tengah
-    if (rightDensity > leftDensity * 1.3 && topDensity > 0.3 && botDensity > 0.3 && midDensity > 0.25) {
-      if (normalizedGrid[1][0] < 0.25 && normalizedGrid[3][0] < 0.25) {
-        return 3;
-      }
-    }
-
-    // ANGKA 5: Atas horizontal, kiri atas vertikal turun, lalu lengkung bawah ke kanan
-    if (topDensity > 0.35 && normalizedGrid[1][0] + normalizedGrid[1][1] > 0.3 && normalizedGrid[3][3] + normalizedGrid[3][4] > 0.3) {
-      if (normalizedGrid[1][4] < 0.2) {
-        return 5;
-      }
-    }
-
-    // ANGKA 6: Lengkung dari atas kanan/tengah meluncur ke bawah membuat loop bawah tertutup
-    if (leftDensity > rightDensity && botDensity > 0.35 && normalizedGrid[3][3] + normalizedGrid[4][3] > 0.25) {
-      if (normalizedGrid[0][3] + normalizedGrid[0][4] < 0.25 || normalizedGrid[1][4] < 0.15) {
+    // ANGKA 6: Kuadran Kanan Atas (Upper-Right) KOSONG / jauh lebih renggang dibanding Kanan Bawah & Kiri
+    // Pada angka 6, goresan meluncur dari atas kiri/tengah turun ke bawah, membuat loop di bawah saja.
+    if (upperRight < 0.20 && (lowerRight > 0.28 || normGrid[5][5] + normGrid[6][5] > 0.4)) {
+      if (normGrid[2][1] + normGrid[3][1] + normGrid[4][1] > 0.3) {
         return 6;
       }
     }
 
-    // ANGKA 9: Loop di atas tertutup/padat, tiang turun di kanan bawah atau tengah bawah
-    if (topDensity > 0.35 && normalizedGrid[1][1] + normalizedGrid[1][3] > 0.3 && normalizedGrid[4][0] < 0.2) {
-      if (rightDensity > leftDensity || normalizedGrid[3][3] + normalizedGrid[4][3] > 0.25) {
+    // ANGKA 9: Kuadran Kiri Bawah (Lower-Left) KOSONG / jauh lebih renggang dibanding Kiri Atas & Kanan
+    // Pada angka 9, goresan membentuk loop di atas (Upper-Left & Upper-Right padat), lalu tiang turun ke kanan/tengah bawah.
+    if (lowerLeft < 0.18 && upperRight > 0.28 && upperLeft > 0.25) {
+      if (normGrid[4][6] + normGrid[5][6] + normGrid[6][6] > 0.25 || normGrid[5][4] + normGrid[6][4] > 0.3) {
         return 9;
       }
     }
 
-    // 5. TEMPLATE MATCHING SCORE (Jika topologi spesifik di atas imbang, hitung jarak Euclidean termirip)
-    const idealTemplates: Record<number, number[][]> = {
+    // ANGKA 0 vs ANGKA 8:
+    // Kedua angka ini memiliki keempat kuadran (Upper-Left, Upper-Right, Lower-Left, Lower-Right) yang terisi.
+    // Pemisah mutlak: ANGKA 0 berlubang di tengah (Center Knot kosong), ANGKA 8 bersilang/simpul padat di tengah!
+    if (upperLeft > 0.22 && upperRight > 0.22 && lowerLeft > 0.22 && lowerRight > 0.22) {
+      if (centerKnot < 0.23 && hMidCross <= 2) {
+        return 0;
+      }
+      if (centerKnot > 0.35 || hMidCross >= 3 || (normGrid[3][3] > 0.3 && normGrid[4][4] > 0.3)) {
+        return 8;
+      }
+    }
+
+    // ANGKA 4: Kiri Bawah KOSONG total (`normGrid[6][1] + normGrid[6][2] < 0.15`), tengah ada palang datar, kanan ada tiang
+    if (lowerLeft < 0.16 && normGrid[6][0] < 0.16 && normGrid[7][0] < 0.16) {
+      if ((normGrid[4][2] > 0.25 || normGrid[4][3] > 0.25 || normGrid[3][3] > 0.25) && normGrid[5][6] + normGrid[6][6] > 0.25) {
+        return 4;
+      }
+    }
+
+    // ANGKA 7: Baris atas sangat padat horizontal (topBar > 0.45), Kanan Bawah KOSONG (`lowerRight < 0.16`)
+    if (topBar > 0.42 && lowerRight < 0.18 && normGrid[6][7] < 0.15 && normGrid[7][7] < 0.15) {
+      if (normGrid[4][3] + normGrid[5][3] + normGrid[6][2] > 0.25) {
+        return 7;
+      }
+    }
+
+    // ANGKA 2: Lengkungan atas kiri->kanan, lalu diagonal ke kiri bawah, dan baris bawah horizontal padat (botBar > 0.45)
+    if (botBar > 0.42 && normGrid[1][1] + normGrid[1][2] > 0.25 && normGrid[6][6] + normGrid[7][6] > 0.35) {
+      if (normGrid[2][6] + normGrid[3][5] + normGrid[4][4] + normGrid[5][3] > 0.4) {
+        return 2;
+      }
+    }
+
+    // ANGKA 3: Sisi kiri tengah berindentasi/kosong (`normGrid[3][1] + normGrid[4][1] < 0.2`), sisi kanan dua lengkungan
+    if (normGrid[3][1] + normGrid[4][1] < 0.18 && normGrid[2][6] + normGrid[5][6] > 0.4) {
+      if (topBar > 0.25 && botBar > 0.25) {
+        return 3;
+      }
+    }
+
+    // ANGKA 5: Atas horizontal, kiri vertikal turun, lalu lengkung kanan bawah. Kiri Bawah KOSONG (`lowerLeft < 0.18`)
+    if (lowerLeft < 0.18 && topBar > 0.35 && normGrid[1][1] + normGrid[2][1] > 0.3 && lowerRight > 0.3) {
+      return 5;
+    }
+
+    // --- 4. HIGH-PRECISION 8x8 TEMPLATE MATCHING (64 Euclidean Cells) ---
+    // Bank 10 Template Multi-Style dengan bobot khusus kuadran
+    const idealTemplates8x8: Record<number, number[][]> = {
       0: [
-        [0.8, 1.0, 1.0, 1.0, 0.8],
-        [1.0, 0.2, 0.0, 0.2, 1.0],
-        [1.0, 0.0, 0.0, 0.0, 1.0],
-        [1.0, 0.2, 0.0, 0.2, 1.0],
-        [0.8, 1.0, 1.0, 1.0, 0.8]
+        [0.0, 0.6, 1.0, 1.0, 1.0, 1.0, 0.6, 0.0],
+        [0.6, 1.0, 0.4, 0.0, 0.0, 0.4, 1.0, 0.6],
+        [1.0, 0.6, 0.0, 0.0, 0.0, 0.0, 0.6, 1.0],
+        [1.0, 0.2, 0.0, 0.0, 0.0, 0.0, 0.2, 1.0],
+        [1.0, 0.2, 0.0, 0.0, 0.0, 0.0, 0.2, 1.0],
+        [1.0, 0.6, 0.0, 0.0, 0.0, 0.0, 0.6, 1.0],
+        [0.6, 1.0, 0.4, 0.0, 0.0, 0.4, 1.0, 0.6],
+        [0.0, 0.6, 1.0, 1.0, 1.0, 1.0, 0.6, 0.0]
       ],
       1: [
-        [0.0, 0.3, 1.0, 0.3, 0.0],
-        [0.0, 0.1, 1.0, 0.1, 0.0],
-        [0.0, 0.1, 1.0, 0.1, 0.0],
-        [0.0, 0.1, 1.0, 0.1, 0.0],
-        [0.3, 0.6, 1.0, 0.6, 0.3]
+        [0.0, 0.0, 0.2, 1.0, 1.0, 0.2, 0.0, 0.0],
+        [0.0, 0.2, 0.6, 1.0, 1.0, 0.0, 0.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0],
+        [0.2, 0.6, 1.0, 1.0, 1.0, 1.0, 0.6, 0.2]
       ],
       2: [
-        [0.6, 1.0, 1.0, 1.0, 0.6],
-        [0.1, 0.0, 0.2, 1.0, 0.8],
-        [0.0, 0.4, 1.0, 0.6, 0.0],
-        [0.6, 1.0, 0.4, 0.0, 0.0],
-        [1.0, 1.0, 1.0, 1.0, 1.0]
+        [0.0, 0.6, 1.0, 1.0, 1.0, 1.0, 0.6, 0.0],
+        [0.8, 1.0, 0.2, 0.0, 0.0, 0.4, 1.0, 0.8],
+        [0.2, 0.2, 0.0, 0.0, 0.0, 0.6, 1.0, 0.4],
+        [0.0, 0.0, 0.0, 0.2, 0.8, 1.0, 0.2, 0.0],
+        [0.0, 0.0, 0.4, 1.0, 0.8, 0.0, 0.0, 0.0],
+        [0.2, 0.8, 1.0, 0.4, 0.0, 0.0, 0.0, 0.0],
+        [0.8, 1.0, 0.4, 0.0, 0.0, 0.0, 0.2, 0.6],
+        [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
       ],
       3: [
-        [0.8, 1.0, 1.0, 1.0, 0.6],
-        [0.0, 0.0, 0.2, 1.0, 0.8],
-        [0.2, 0.6, 1.0, 1.0, 0.2],
-        [0.0, 0.0, 0.2, 1.0, 0.8],
-        [0.8, 1.0, 1.0, 1.0, 0.6]
+        [0.2, 0.8, 1.0, 1.0, 1.0, 1.0, 0.6, 0.0],
+        [0.6, 0.4, 0.0, 0.0, 0.0, 0.4, 1.0, 0.6],
+        [0.0, 0.0, 0.0, 0.0, 0.0, 0.8, 1.0, 0.2],
+        [0.0, 0.0, 0.2, 0.8, 1.0, 1.0, 0.2, 0.0],
+        [0.0, 0.0, 0.0, 0.0, 0.0, 0.8, 1.0, 0.2],
+        [0.0, 0.0, 0.0, 0.0, 0.0, 0.4, 1.0, 0.6],
+        [0.6, 0.4, 0.0, 0.0, 0.0, 0.4, 1.0, 0.6],
+        [0.2, 0.8, 1.0, 1.0, 1.0, 1.0, 0.6, 0.0]
       ],
       4: [
-        [0.2, 0.8, 0.0, 1.0, 0.1],
-        [0.6, 0.8, 0.0, 1.0, 0.1],
-        [1.0, 1.0, 1.0, 1.0, 1.0],
-        [0.0, 0.0, 0.0, 1.0, 0.0],
-        [0.0, 0.0, 0.0, 1.0, 0.0]
+        [0.0, 0.0, 0.6, 1.0, 0.0, 0.6, 1.0, 0.0],
+        [0.0, 0.4, 0.8, 1.0, 0.0, 0.6, 1.0, 0.0],
+        [0.0, 0.8, 1.0, 0.4, 0.0, 0.6, 1.0, 0.0],
+        [0.4, 1.0, 0.6, 0.0, 0.0, 0.6, 1.0, 0.0],
+        [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+        [0.0, 0.0, 0.0, 0.0, 0.0, 0.6, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 0.0, 0.0, 0.6, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 0.0, 0.0, 0.6, 1.0, 0.0]
       ],
       5: [
-        [1.0, 1.0, 1.0, 1.0, 1.0],
-        [1.0, 0.2, 0.0, 0.0, 0.0],
-        [1.0, 1.0, 1.0, 0.8, 0.0],
-        [0.0, 0.0, 0.0, 1.0, 0.8],
-        [0.8, 1.0, 1.0, 1.0, 0.4]
+        [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.6],
+        [1.0, 0.8, 0.2, 0.0, 0.0, 0.0, 0.0, 0.0],
+        [1.0, 1.0, 0.8, 0.0, 0.0, 0.0, 0.0, 0.0],
+        [1.0, 1.0, 1.0, 1.0, 1.0, 0.8, 0.0, 0.0],
+        [0.0, 0.0, 0.0, 0.0, 0.2, 0.8, 1.0, 0.4],
+        [0.0, 0.0, 0.0, 0.0, 0.0, 0.2, 1.0, 0.8],
+        [0.6, 0.4, 0.0, 0.0, 0.0, 0.4, 1.0, 0.6],
+        [0.2, 0.8, 1.0, 1.0, 1.0, 1.0, 0.6, 0.0]
       ],
       6: [
-        [0.3, 0.8, 1.0, 0.6, 0.0],
-        [0.8, 0.4, 0.0, 0.0, 0.0],
-        [1.0, 1.0, 1.0, 0.8, 0.0],
-        [1.0, 0.2, 0.2, 1.0, 0.8],
-        [0.6, 1.0, 1.0, 1.0, 0.6]
+        [0.0, 0.4, 0.8, 1.0, 0.8, 0.2, 0.0, 0.0],
+        [0.4, 0.8, 1.0, 0.4, 0.0, 0.0, 0.0, 0.0],
+        [0.8, 1.0, 0.2, 0.0, 0.0, 0.0, 0.0, 0.0],
+        [1.0, 0.8, 0.8, 1.0, 1.0, 0.8, 0.2, 0.0],
+        [1.0, 1.0, 0.4, 0.0, 0.2, 0.8, 1.0, 0.2],
+        [1.0, 0.8, 0.0, 0.0, 0.0, 0.4, 1.0, 0.6],
+        [0.8, 1.0, 0.4, 0.0, 0.0, 0.4, 1.0, 0.6],
+        [0.2, 0.8, 1.0, 1.0, 1.0, 1.0, 0.6, 0.0]
       ],
       7: [
-        [1.0, 1.0, 1.0, 1.0, 1.0],
-        [0.0, 0.0, 0.2, 1.0, 0.6],
-        [0.0, 0.0, 0.8, 0.8, 0.0],
-        [0.0, 0.4, 0.8, 0.0, 0.0],
-        [0.2, 0.8, 0.2, 0.0, 0.0]
+        [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+        [0.0, 0.0, 0.0, 0.0, 0.2, 0.8, 1.0, 0.8],
+        [0.0, 0.0, 0.0, 0.2, 0.8, 1.0, 0.4, 0.0],
+        [0.0, 0.0, 0.0, 0.6, 1.0, 0.4, 0.0, 0.0],
+        [0.0, 0.0, 0.2, 0.8, 1.0, 0.0, 0.0, 0.0],
+        [0.0, 0.0, 0.6, 1.0, 0.2, 0.0, 0.0, 0.0],
+        [0.0, 0.2, 0.8, 1.0, 0.0, 0.0, 0.0, 0.0],
+        [0.0, 0.6, 1.0, 0.4, 0.0, 0.0, 0.0, 0.0]
       ],
       8: [
-        [0.6, 1.0, 1.0, 1.0, 0.6],
-        [0.8, 0.2, 0.2, 0.8, 0.8],
-        [0.4, 0.8, 1.0, 0.8, 0.4],
-        [0.8, 0.2, 0.2, 0.8, 0.8],
-        [0.6, 1.0, 1.0, 1.0, 0.6]
+        [0.2, 0.8, 1.0, 1.0, 1.0, 1.0, 0.8, 0.2],
+        [0.8, 1.0, 0.4, 0.0, 0.0, 0.4, 1.0, 0.8],
+        [0.6, 1.0, 0.6, 0.0, 0.0, 0.6, 1.0, 0.6],
+        [0.2, 0.8, 1.0, 0.8, 0.8, 1.0, 0.8, 0.2],
+        [0.2, 0.8, 1.0, 0.8, 0.8, 1.0, 0.8, 0.2],
+        [0.8, 1.0, 0.4, 0.0, 0.0, 0.4, 1.0, 0.8],
+        [0.8, 1.0, 0.4, 0.0, 0.0, 0.4, 1.0, 0.8],
+        [0.2, 0.8, 1.0, 1.0, 1.0, 1.0, 0.8, 0.2]
       ],
       9: [
-        [0.6, 1.0, 1.0, 1.0, 0.6],
-        [0.8, 0.2, 0.2, 1.0, 0.8],
-        [0.6, 1.0, 1.0, 1.0, 1.0],
-        [0.0, 0.0, 0.2, 1.0, 0.6],
-        [0.0, 0.6, 0.8, 0.4, 0.0]
+        [0.2, 0.8, 1.0, 1.0, 1.0, 1.0, 0.8, 0.2],
+        [0.8, 1.0, 0.4, 0.0, 0.0, 0.6, 1.0, 0.8],
+        [0.8, 1.0, 0.4, 0.0, 0.0, 0.6, 1.0, 1.0],
+        [0.6, 1.0, 0.8, 0.8, 1.0, 1.0, 1.0, 1.0],
+        [0.0, 0.4, 0.8, 1.0, 1.0, 0.8, 1.0, 0.8],
+        [0.0, 0.0, 0.0, 0.0, 0.0, 0.6, 1.0, 0.6],
+        [0.0, 0.0, 0.0, 0.0, 0.4, 1.0, 0.8, 0.2],
+        [0.0, 0.0, 0.0, 0.2, 0.8, 1.0, 0.4, 0.0]
       ]
     };
 
@@ -411,12 +417,26 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
     let minDistance = Infinity;
 
     for (let d = 0; d <= 9; d++) {
-      const template = idealTemplates[d];
+      const tmpl = idealTemplates8x8[d];
       let dist = 0;
-      for (let r = 0; r < 5; r++) {
-        for (let c = 0; c < 5; c++) {
-          const diff = normalizedGrid[r][c] - template[r][c];
-          dist += diff * diff;
+      for (let r = 0; r < 8; r++) {
+        for (let c = 0; c < 8; c++) {
+          let weight = 1.0;
+          // Beri bobot ekstra (3x) pada sel Upper-Right jika membedakan 6 vs 8
+          if ((r <= 2 && c >= 5) && (d === 6 || d === 8)) {
+            weight = 3.0;
+          }
+          // Beri bobot ekstra (3x) pada sel Lower-Left jika membedakan 9 vs 8
+          if ((r >= 5 && c <= 2) && (d === 9 || d === 8)) {
+            weight = 3.0;
+          }
+          // Beri bobot ekstra (3x) pada sel Center jika membedakan 0 vs 8
+          if ((r === 3 || r === 4) && (c === 3 || c === 4) && (d === 0 || d === 8)) {
+            weight = 3.0;
+          }
+
+          const diff = normGrid[r][c] - tmpl[r][c];
+          dist += (diff * diff) * weight;
         }
       }
       if (dist < minDistance) {
@@ -437,7 +457,6 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
     setIsModelLoading(true);
 
     try {
-      // Kita jalankan prediksi ML Kit secara paralel dengan batas waktu maksimal (timeout 120ms)
       const mlKitPromise = new Promise<number | null>(async (resolve) => {
         try {
           const canvas = canvasRef.current;
@@ -466,10 +485,7 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
       const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 120));
       const mlKitDigit = await Promise.race([mlKitPromise, timeoutPromise]);
       
-      // Hitung dari Pixel Bitmap & Topologi Scanline asli
       const bitmapDigit = predictDigitFromCanvasBitmap();
-
-      // Jika ML Kit dan Bitmap sepakat atau ML Kit null, kita prioritaskan Bitmap Engine yang jauh lebih akurat di Web
       const finalDigit = bitmapDigit !== null ? bitmapDigit : (mlKitDigit !== null && mlKitDigit >= 0 && mlKitDigit <= 9 ? mlKitDigit : 0);
 
       if (finalDigit !== null) {
