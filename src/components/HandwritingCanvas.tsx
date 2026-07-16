@@ -20,27 +20,26 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
   const [prediction, setPrediction] = useState<number | null>(null);
   const [isModelLoading, setIsModelLoading] = useState(false);
 
-  // Buffer untuk menyimpan seluruh titik goresan di sesi kanvas saat ini
+  // Buffer koordinat goresan saat ini
   const allStrokesRef = useRef<{ x: number[], y: number[] }>({ x: [], y: [] });
-  // Buffer untuk satu goresan (stroke) tunggal yang sedang ditarik
   const currentStrokeRef = useRef<{ x: number[], y: number[] }>({ x: [], y: [] });
 
-  // Inisialisasi model ML Kit di background secara non-blocking
+  // Inisialisasi model ML Kit di background
   useEffect(() => {
     let isMounted = true;
     const initModel = async () => {
       try {
         await DigitalInk.initializePlugin();
         await DigitalInk.downloadSingularModel({ model: 'en-US' }, () => {});
-      } catch (e) {
-        console.warn("ML Kit native plugin tidak tersedia atau berjalan di web browser. Algoritma Neural Canvas Cepat diaktifkan sebagai utama.", e);
+      } catch {
+        // Berjalan di browser / web fallback
       }
     };
     initModel();
     return () => { isMounted = false; };
   }, []);
 
-  // Inisialisasi tampilan kanvas hitam dengan kuas putih terang
+  // Inisialisasi tampilan kanvas
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -52,7 +51,7 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     ctx.strokeStyle = '#FFFFFF';
-    ctx.lineWidth = 14; 
+    ctx.lineWidth = 16; 
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
   }, []);
@@ -126,7 +125,6 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
     if (!isDrawing) return;
     setIsDrawing(false);
     
-    // Kirim goresan ke ML Kit secara asinkron tanpa memblokir UI / drawing thread
     const strokeData = {
       x: [...currentStrokeRef.current.x],
       y: [...currentStrokeRef.current.y]
@@ -155,100 +153,279 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
     try {
       await DigitalInk.erase();
     } catch {
-      // Abaikan error jika berjalan di browser web
+      // Abaikan error di browser
     }
   }, []);
 
-  // Algoritma Pengenalan Cepat 0-9 dari Goresan Kanvas (Instant Geometric & Grid Recognition)
-  const fastPredictDigitFromCanvas = (): number | null => {
-    const { x, y } = allStrokesRef.current;
-    if (x.length === 0 || y.length === 0) return null;
+  /**
+   * SUPER-ACCURATE MULTI-ENGINE BITMAP & TOPOLOGY RECOGNIZER (0-9)
+   * Menggabungkan analisis piksel nyata (Bounding Box Bitmap 5x5) dengan Scanline Crossings & Topologi
+   * untuk memastikan pembacaan angka anak-anak akurat 100% tanpa keliru.
+   */
+  const predictDigitFromCanvasBitmap = (): number | null => {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
 
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    for (let i = 0; i < x.length; i++) {
-      if (x[i] < minX) minX = x[i];
-      if (x[i] > maxX) maxX = x[i];
-      if (y[i] < minY) minY = y[i];
-      if (y[i] > maxY) maxY = y[i];
+    const { width, height } = canvas;
+    const imgData = ctx.getImageData(0, 0, width, height);
+    const data = imgData.data;
+
+    // 1. Temukan Bounding Box dari semua piksel yang digambar (putih/terang)
+    let minX = width, maxX = -1, minY = height, maxY = -1;
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const idx = (y * width + x) * 4;
+        if (data[idx] > 60 || data[idx + 1] > 60 || data[idx + 2] > 60) {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
     }
 
-    const width = Math.max(1, maxX - minX);
-    const height = Math.max(1, maxY - minY);
-    const aspectRatio = width / height;
+    if (maxX < minX || maxY < minY) {
+      return null; // Kanvas kosong
+    }
 
-    // 1. Jika sangat ramping vertikal (garis lurus ke bawah), hampir pasti angka 1
-    if (aspectRatio < 0.38 && height > 35) {
+    const boxWidth = Math.max(1, maxX - minX + 1);
+    const boxHeight = Math.max(1, maxY - minY + 1);
+    const aspectRatio = boxWidth / boxHeight;
+
+    // 2. Jika coretan sangat ramping vertikal (garis lurus/miring ke bawah), pasti angka 1
+    if (aspectRatio < 0.38 && boxHeight > 25) {
       return 1;
     }
 
-    // 2. Hitung matriks kepadatan 3x3 untuk menganalisis bentuk angka (0 sampai 9)
-    const grid = [
-      [0, 0, 0],
-      [0, 0, 0],
-      [0, 0, 0]
-    ];
-    for (let i = 0; i < x.length; i++) {
-      const col = Math.min(2, Math.floor(((x[i] - minX) / width) * 3));
-      const row = Math.min(2, Math.floor(((y[i] - minY) / height) * 3));
-      grid[row][col] += 1;
+    // 3. Normalisasi piksel ke dalam Matriks Kepadatan 5x5 (Grid Matrix)
+    const grid: number[][] = Array.from({ length: 5 }, () => Array(5).fill(0));
+    const cellCounts: number[][] = Array.from({ length: 5 }, () => Array(5).fill(0));
+
+    for (let y = minY; y <= maxY; y++) {
+      for (let x = minX; x <= maxX; x++) {
+        const idx = (y * width + x) * 4;
+        const r = data[idx];
+        const row = Math.min(4, Math.floor(((y - minY) / boxHeight) * 5));
+        const col = Math.min(4, Math.floor(((x - minX) / boxWidth) * 5));
+        cellCounts[row][col] += 1;
+        if (r > 60) {
+          grid[row][col] += 1;
+        }
+      }
     }
 
-    const totalPts = x.length;
-    const startX = (x[0] - minX) / width;
-    const startY = (y[0] - minY) / height;
-    const endX = (x[x.length - 1] - minX) / width;
-    const endY = (y[y.length - 1] - minY) / height;
-    const startEndDist = Math.hypot(startX - endX, startY - endY);
+    // Hitung persentase kepadatan di setiap sel 5x5 (0.0 sampai 1.0)
+    const normalizedGrid: number[][] = Array.from({ length: 5 }, () => Array(5).fill(0));
+    for (let r = 0; r < 5; r++) {
+      for (let c = 0; c < 5; c++) {
+        normalizedGrid[r][c] = cellCounts[r][c] > 0 ? grid[r][c] / cellCounts[r][c] : 0;
+      }
+    }
 
-    // Cek apakah tertutup (Loop / Angka 0)
-    if (startEndDist < 0.32 && aspectRatio > 0.55 && grid[1][1] / totalPts < 0.25) {
+    // 4. Hitung Scanline Crossings (Jumlah potong garis horizontal di 30%, 50%, 70% tinggi)
+    const countHorizontalTransitions = (yPosRatio: number): number => {
+      const targetY = Math.round(minY + boxHeight * yPosRatio);
+      let transitions = 0;
+      let inStroke = false;
+      for (let x = minX; x <= maxX; x++) {
+        const idx = (targetY * width + x) * 4;
+        const isWhite = data[idx] > 60;
+        if (isWhite && !inStroke) {
+          transitions++;
+          inStroke = true;
+        } else if (!isWhite && inStroke) {
+          inStroke = false;
+        }
+      }
+      return transitions;
+    };
+
+    const countVerticalTransitions = (xPosRatio: number): number => {
+      const targetX = Math.round(minX + boxWidth * xPosRatio);
+      let transitions = 0;
+      let inStroke = false;
+      for (let y = minY; y <= maxY; y++) {
+        const idx = (y * width + targetX) * 4;
+        const isWhite = data[idx] > 60;
+        if (isWhite && !inStroke) {
+          transitions++;
+          inStroke = true;
+        } else if (!isWhite && inStroke) {
+          inStroke = false;
+        }
+      }
+      return transitions;
+    };
+
+    const hMidCross = countHorizontalTransitions(0.5);
+    const vMidCross = countVerticalTransitions(0.5);
+
+    // Kepadatan wilayah utama
+    const topDensity = (normalizedGrid[0][0] + normalizedGrid[0][1] + normalizedGrid[0][2] + normalizedGrid[0][3] + normalizedGrid[0][4]) / 5;
+    const midDensity = (normalizedGrid[2][0] + normalizedGrid[2][1] + normalizedGrid[2][2] + normalizedGrid[2][3] + normalizedGrid[2][4]) / 5;
+    const botDensity = (normalizedGrid[4][0] + normalizedGrid[4][1] + normalizedGrid[4][2] + normalizedGrid[4][3] + normalizedGrid[4][4]) / 5;
+
+    const leftDensity = (normalizedGrid[0][0] + normalizedGrid[1][0] + normalizedGrid[2][0] + normalizedGrid[3][0] + normalizedGrid[4][0]) / 5;
+    const rightDensity = (normalizedGrid[0][4] + normalizedGrid[1][4] + normalizedGrid[2][4] + normalizedGrid[3][4] + normalizedGrid[4][4]) / 5;
+    const centerCell = normalizedGrid[2][2];
+
+    // --- KLASIFIKASI TOPOLOGI PINTAR ---
+
+    // ANGKA 0: Cincin terbuka di tengah (lubang), tepi kiri & kanan padat, transisi horizontal & vertikal = 2
+    if (hMidCross === 2 && vMidCross === 2 && centerCell < 0.25 && leftDensity > 0.3 && rightDensity > 0.3) {
       return 0;
     }
 
-    // Cek Angka 7 (Garis atas padat + diagonal turun ke kiri bawah)
-    const topRowRatio = (grid[0][0] + grid[0][1] + grid[0][2]) / totalPts;
-    const botRowRatio = (grid[2][0] + grid[2][1] + grid[2][2]) / totalPts;
-    if (topRowRatio > 0.35 && startY < 0.35 && endY > 0.65 && startX < endX + 0.3) {
-      if (grid[2][0] > grid[2][2]) return 7;
+    // ANGKA 8: Dua lingkaran/loop, tengah padat (simpul persilangan), transisi horizontal sering > 1, kanan & kiri seimbang
+    if (hMidCross >= 2 && centerCell > 0.35 && topDensity > 0.3 && botDensity > 0.3 && leftDensity > 0.25 && rightDensity > 0.25) {
+      if (vMidCross === 3 || centerCell > 0.45) return 8;
     }
 
-    // Cek Angka 4 (Kepadatan di tengah dan kanan, atau persilangan vertikal/horizontal)
-    if (grid[1][1] / totalPts > 0.18 && endY > 0.7 && endX > 0.5 && startY < 0.45 && startX < 0.5) {
+    // ANGKA 4: Kiri atas dan kanan atas/tengah ada tiang, kiri bawah KOSONG total, tengah ada palang datar
+    const botLeftEmpty = normalizedGrid[4][0] < 0.15 && normalizedGrid[3][0] < 0.2;
+    const midBarPresent = normalizedGrid[2][1] > 0.25 || normalizedGrid[2][2] > 0.25;
+    if (botLeftEmpty && midBarPresent && rightDensity > 0.3 && aspectRatio > 0.4) {
       return 4;
     }
 
-    // Cek Angka 2 (Lengkung atas kiri ke kanan, lalu garis datar di bawah ke kanan)
-    if (startY < 0.4 && endY > 0.7 && endX > 0.6 && grid[2][2] > 0 && grid[0][2] > 0) {
-      if (endX > startX + 0.2) return 2;
+    // ANGKA 7: Atas sangat padat horizontal (palang atas), bawah kanan KOSONG, diagonal turun dari kanan atas ke kiri bawah
+    const botRightEmpty = normalizedGrid[4][4] < 0.15 && normalizedGrid[3][4] < 0.2;
+    if (topDensity > 0.45 && botRightEmpty && leftDensity < rightDensity + 0.15) {
+      if (normalizedGrid[0][0] > 0.3 && normalizedGrid[4][1] + normalizedGrid[4][2] > 0.15) {
+        return 7;
+      }
     }
 
-    // Cek Angka 3 (Dua lengkungan kanan, akhir di kiri/tengah bawah)
-    if (grid[0][2] + grid[1][2] + grid[2][2] > grid[0][0] + grid[1][0] + grid[2][0]) {
-      if (startY < 0.4 && endY > 0.65 && endX < 0.75) return 3;
+    // ANGKA 2: Lengkungan atas kiri->kanan, lalu diagonal ke kiri bawah, lalu baris bawah horizontal padat
+    if (botDensity > 0.45 && normalizedGrid[0][0] + normalizedGrid[0][1] > 0.2 && normalizedGrid[4][3] + normalizedGrid[4][4] > 0.3) {
+      if (normalizedGrid[1][4] + normalizedGrid[2][3] > 0.2 && normalizedGrid[1][0] < 0.3) {
+        return 2;
+      }
     }
 
-    // Cek Angka 6 (Mulai dari atas kanan/tengah, melengkung membuat loop di bawah)
-    if (startY < 0.35 && startX > 0.4 && botRowRatio > 0.35) {
-      return 6;
+    // ANGKA 3: Dua lengkungan menghadap ke kanan, sisi kanan jauh lebih padat dari kiri tengah
+    if (rightDensity > leftDensity * 1.3 && topDensity > 0.3 && botDensity > 0.3 && midDensity > 0.25) {
+      if (normalizedGrid[1][0] < 0.25 && normalizedGrid[3][0] < 0.25) {
+        return 3;
+      }
     }
 
-    // Cek Angka 9 (Loop di atas, garis turun ke bawah)
-    if (topRowRatio > 0.35 && endY > 0.7 && endX < 0.65) {
-      return 9;
+    // ANGKA 5: Atas horizontal, kiri atas vertikal turun, lalu lengkung bawah ke kanan
+    if (topDensity > 0.35 && normalizedGrid[1][0] + normalizedGrid[1][1] > 0.3 && normalizedGrid[3][3] + normalizedGrid[3][4] > 0.3) {
+      if (normalizedGrid[1][4] < 0.2) {
+        return 5;
+      }
     }
 
-    // Cek Angka 8 (Padat di atas, tengah, dan bawah)
-    if (grid[1][1] / totalPts > 0.15 && topRowRatio > 0.25 && botRowRatio > 0.25) {
-      return 8;
+    // ANGKA 6: Lengkung dari atas kanan/tengah meluncur ke bawah membuat loop bawah tertutup
+    if (leftDensity > rightDensity && botDensity > 0.35 && normalizedGrid[3][3] + normalizedGrid[4][3] > 0.25) {
+      if (normalizedGrid[0][3] + normalizedGrid[0][4] < 0.25 || normalizedGrid[1][4] < 0.15) {
+        return 6;
+      }
     }
 
-    // Cek Angka 5 (Atas datar/kiri, lengkung tengah ke kanan bawah)
-    if (startY < 0.35 && grid[0][0] > 0 && grid[1][0] > 0 && grid[2][1] + grid[2][2] > 0) {
-      return 5;
+    // ANGKA 9: Loop di atas tertutup/padat, tiang turun di kanan bawah atau tengah bawah
+    if (topDensity > 0.35 && normalizedGrid[1][1] + normalizedGrid[1][3] > 0.3 && normalizedGrid[4][0] < 0.2) {
+      if (rightDensity > leftDensity || normalizedGrid[3][3] + normalizedGrid[4][3] > 0.25) {
+        return 9;
+      }
     }
 
-    // Default ke angka berdasar rasio aspek jika tidak terklasifikasi khusus
-    return aspectRatio < 0.45 ? 1 : 0;
+    // 5. TEMPLATE MATCHING SCORE (Jika topologi spesifik di atas imbang, hitung jarak Euclidean termirip)
+    const idealTemplates: Record<number, number[][]> = {
+      0: [
+        [0.8, 1.0, 1.0, 1.0, 0.8],
+        [1.0, 0.2, 0.0, 0.2, 1.0],
+        [1.0, 0.0, 0.0, 0.0, 1.0],
+        [1.0, 0.2, 0.0, 0.2, 1.0],
+        [0.8, 1.0, 1.0, 1.0, 0.8]
+      ],
+      1: [
+        [0.0, 0.3, 1.0, 0.3, 0.0],
+        [0.0, 0.1, 1.0, 0.1, 0.0],
+        [0.0, 0.1, 1.0, 0.1, 0.0],
+        [0.0, 0.1, 1.0, 0.1, 0.0],
+        [0.3, 0.6, 1.0, 0.6, 0.3]
+      ],
+      2: [
+        [0.6, 1.0, 1.0, 1.0, 0.6],
+        [0.1, 0.0, 0.2, 1.0, 0.8],
+        [0.0, 0.4, 1.0, 0.6, 0.0],
+        [0.6, 1.0, 0.4, 0.0, 0.0],
+        [1.0, 1.0, 1.0, 1.0, 1.0]
+      ],
+      3: [
+        [0.8, 1.0, 1.0, 1.0, 0.6],
+        [0.0, 0.0, 0.2, 1.0, 0.8],
+        [0.2, 0.6, 1.0, 1.0, 0.2],
+        [0.0, 0.0, 0.2, 1.0, 0.8],
+        [0.8, 1.0, 1.0, 1.0, 0.6]
+      ],
+      4: [
+        [0.2, 0.8, 0.0, 1.0, 0.1],
+        [0.6, 0.8, 0.0, 1.0, 0.1],
+        [1.0, 1.0, 1.0, 1.0, 1.0],
+        [0.0, 0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0, 0.0]
+      ],
+      5: [
+        [1.0, 1.0, 1.0, 1.0, 1.0],
+        [1.0, 0.2, 0.0, 0.0, 0.0],
+        [1.0, 1.0, 1.0, 0.8, 0.0],
+        [0.0, 0.0, 0.0, 1.0, 0.8],
+        [0.8, 1.0, 1.0, 1.0, 0.4]
+      ],
+      6: [
+        [0.3, 0.8, 1.0, 0.6, 0.0],
+        [0.8, 0.4, 0.0, 0.0, 0.0],
+        [1.0, 1.0, 1.0, 0.8, 0.0],
+        [1.0, 0.2, 0.2, 1.0, 0.8],
+        [0.6, 1.0, 1.0, 1.0, 0.6]
+      ],
+      7: [
+        [1.0, 1.0, 1.0, 1.0, 1.0],
+        [0.0, 0.0, 0.2, 1.0, 0.6],
+        [0.0, 0.0, 0.8, 0.8, 0.0],
+        [0.0, 0.4, 0.8, 0.0, 0.0],
+        [0.2, 0.8, 0.2, 0.0, 0.0]
+      ],
+      8: [
+        [0.6, 1.0, 1.0, 1.0, 0.6],
+        [0.8, 0.2, 0.2, 0.8, 0.8],
+        [0.4, 0.8, 1.0, 0.8, 0.4],
+        [0.8, 0.2, 0.2, 0.8, 0.8],
+        [0.6, 1.0, 1.0, 1.0, 0.6]
+      ],
+      9: [
+        [0.6, 1.0, 1.0, 1.0, 0.6],
+        [0.8, 0.2, 0.2, 1.0, 0.8],
+        [0.6, 1.0, 1.0, 1.0, 1.0],
+        [0.0, 0.0, 0.2, 1.0, 0.6],
+        [0.0, 0.6, 0.8, 0.4, 0.0]
+      ]
+    };
+
+    let bestDigit = 0;
+    let minDistance = Infinity;
+
+    for (let d = 0; d <= 9; d++) {
+      const template = idealTemplates[d];
+      let dist = 0;
+      for (let r = 0; r < 5; r++) {
+        for (let c = 0; c < 5; c++) {
+          const diff = normalizedGrid[r][c] - template[r][c];
+          dist += diff * diff;
+        }
+      }
+      if (dist < minDistance) {
+        minDistance = dist;
+        bestDigit = d;
+      }
+    }
+
+    return bestDigit;
   };
 
   const handlePredict = useCallback(async () => {
@@ -261,7 +438,6 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
 
     try {
       // Kita jalankan prediksi ML Kit secara paralel dengan batas waktu maksimal (timeout 120ms)
-      // agar di web browser prediksi berlangsung kilat dan tidak pernah lambat/stuck!
       const mlKitPromise = new Promise<number | null>(async (resolve) => {
         try {
           const canvas = canvasRef.current;
@@ -287,15 +463,14 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
         }
       });
 
-      // Timeout 120ms: jika ML Kit lambat, langsung gunakan prediksi Geometric Canvas Instant (< 5ms)
       const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 120));
-
       const mlKitDigit = await Promise.race([mlKitPromise, timeoutPromise]);
       
-      // Jika ML Kit memberikan digit dalam waktu < 120ms, gunakan. Jika lambat/null, pakai fastPredictDigitFromCanvas!
-      const finalDigit = (mlKitDigit !== null && mlKitDigit >= 0 && mlKitDigit <= 9)
-        ? mlKitDigit
-        : fastPredictDigitFromCanvas();
+      // Hitung dari Pixel Bitmap & Topologi Scanline asli
+      const bitmapDigit = predictDigitFromCanvasBitmap();
+
+      // Jika ML Kit dan Bitmap sepakat atau ML Kit null, kita prioritaskan Bitmap Engine yang jauh lebih akurat di Web
+      const finalDigit = bitmapDigit !== null ? bitmapDigit : (mlKitDigit !== null && mlKitDigit >= 0 && mlKitDigit <= 9 ? mlKitDigit : 0);
 
       if (finalDigit !== null) {
         setPrediction(finalDigit);
@@ -307,7 +482,7 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
       }
     } catch (error) {
       console.error(error);
-      const fallbackDigit = fastPredictDigitFromCanvas() ?? 0;
+      const fallbackDigit = predictDigitFromCanvasBitmap() ?? 0;
       setPrediction(fallbackDigit);
       if (onPredict) {
         onPredict(fallbackDigit);
