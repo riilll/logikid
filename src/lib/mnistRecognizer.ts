@@ -1,7 +1,7 @@
 /**
  * STATE-OF-THE-ART 28x28 CENTER-OF-MASS & EULER TOPOLOGICAL DIGIT RECOGNIZER (0-9)
- * Menggunakan teknik standar MNIST (Center-of-Mass Alignment 28x28) yang digabungkan
- * dengan analisis topologi lubang (Euler Number via BFS Flood Fill) dan pemisahan kuadran mutlak.
+ * Dilengkapi dengan Strict Quality Gate & Shape Validator agar TIDAK MENEBAK ASAL-ASALAN
+ * jika coretan pengguna tidak seperti angka pada umumnya (doodle, coretan sembarangan, simbol non-angka).
  */
 
 export interface DigitPredictionResult {
@@ -42,7 +42,8 @@ export function recognizeDigitFromCanvasPixels(
     }
   }
 
-  if (maxX < minX || maxY < minY || totalMass < 2.0) {
+  // Jika terlalu sedikit coretan (titik kecil) atau coretan menutupi hampir seluruh layar (coretan asal-asalan)
+  if (maxX < minX || maxY < minY || totalMass < 2.5 || totalMass > 50.0) {
     return null;
   }
 
@@ -173,28 +174,36 @@ export function recognizeDigitFromCanvasPixels(
     }
   }
 
-  // --- 4. ATURAN TOPOLOGI LUBANG MUTLAK (THE EULER HOLE LAWS) ---
+  // --- 4. STRICT TOPOLOGICAL SHAPE GATE (REJECT DOODLES / SEMBARANGAN) ---
+  // Tidak ada angka 0-9 yang memiliki 3 lubang atau lebih (misal coretan jaring/bunga/wajah)
+  if (holes.length >= 3) {
+    return null;
+  }
 
-  // A. Jika ada tepat 2 Lubang terpisah (Satu di atas y < 14.5, Satu di bawah y >= 13.5): PASTI ANGKA 8
-  if (holes.length >= 2) {
+  // A. Jika ada tepat 2 Lubang terpisah:
+  // Cek apakah posisinya atas-bawah (seperti angka 8). Jika posisinya samping-menyamping (seperti kacamata oo), tolak!
+  if (holes.length === 2) {
     const topHoles = holes.filter((h) => h.avgY < 14.5);
     const botHoles = holes.filter((h) => h.avgY >= 13.5);
     if (topHoles.length >= 1 && botHoles.length >= 1) {
-      return { digit: 8, confidence: 0.99, engine: "28x28 Center-of-Mass MNIST Engine (8)" };
+      // Pastikan kedua lubang tidak terlalu jauh ke kiri/kanan satu sama lain
+      if (Math.abs(holes[0].avgX - holes[1].avgX) <= 8.0) {
+        return { digit: 8, confidence: 0.99, engine: "28x28 Center-of-Mass MNIST Engine (8)" };
+      }
     }
+    return null; // Dua lubang tidak beraturan = bukan angka 8 atau angka lain
   }
 
-  // B. Jika ada 1 Lubang: Bedakan dengan mutlak antara Angka 0, 6, 9, atau 4!
+  // B. Jika ada tepat 1 Lubang: Bedakan dengan ketat antara Angka 0, 6, 9, atau 4!
   if (holes.length === 1) {
     const hole = holes[0];
 
-    // ANGKA 0 DIPERIKSA PERTAMA:
-    // Lubang angka 0 membentang luas di tengah dari atas (< 12) ke bawah (> 16), area >= 12
+    // ANGKA 0: Lubang besar di tengah-tengah
     if (hole.area >= 12 && hole.minY <= 12 && hole.maxY >= 16 && Math.abs(hole.avgX - 14) <= 4.5) {
       return { digit: 0, confidence: 0.99, engine: "28x28 Center-of-Mass MNIST Engine (0)" };
     }
 
-    // ANGKA 6: Lubang di bagian bawah (minY >= 11 atau avgY >= 14.0), dan kuadran Kanan Atas terbuka/kosong
+    // ANGKA 6: Lubang di bagian bawah, kuadran Kanan Atas terbuka/kosong
     const upperRightDensity =
       (grid28[5][18] + grid28[5][20] + grid28[7][18] + grid28[7][20] + grid28[9][18] + grid28[9][20]) / 6;
     if (hole.avgY >= 13.8 || hole.minY >= 11) {
@@ -203,9 +212,8 @@ export function recognizeDigitFromCanvasPixels(
       }
     }
 
-    // ANGKA 9 atau 4: Lubang di bagian atas (maxY <= 17 atau avgY <= 13.8)
+    // ANGKA 9 atau 4: Lubang di bagian atas
     if (hole.avgY <= 13.8 || hole.maxY <= 17) {
-      // Cek apakah 4 (sudut segitiga atas tengah dan palang horizontal)
       const botLeftDensity =
         (grid28[18][6] + grid28[18][7] + grid28[20][6] + grid28[20][7] + grid28[22][6] + grid28[22][7]) / 6;
       if (botLeftDensity < 0.16 && hole.avgX < 14) {
@@ -216,6 +224,9 @@ export function recognizeDigitFromCanvasPixels(
       }
       return { digit: 9, confidence: 0.99, engine: "28x28 Center-of-Mass MNIST Engine (9)" };
     }
+
+    // Jika ada 1 lubang tetapi lokasinya sangat aneh/tidak pas dengan struktur 0, 6, 9, atau 4, tolak
+    return null;
   }
 
   // --- 5. ANALISIS KUADRAN KETAT UNTUK ANGKA TANPA LUBANG TERTUTUP (OPEN STROKES) ---
@@ -269,5 +280,7 @@ export function recognizeDigitFromCanvasPixels(
     return { digit: 5, confidence: 0.97, engine: "28x28 Center-of-Mass MNIST Engine (5)" };
   }
 
-  return { digit: 0, confidence: 0.85, engine: "28x28 Center-of-Mass Fallback" };
+  // JANGAN MENEBAK ANGKA SECARA ASAL-ASALAN jika struktur tidak cocok dengan angka manapun 0-9!
+  // Kembalikan null agar sistem menampilkan peringatan/modal kepada pengguna.
+  return null;
 }

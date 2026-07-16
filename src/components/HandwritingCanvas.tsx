@@ -21,6 +21,7 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
   const [prediction, setPrediction] = useState<number | null>(null);
   const [activeEngine, setActiveEngine] = useState<string>("");
   const [isModelLoading, setIsModelLoading] = useState(false);
+  const [warningMessage, setWarningMessage] = useState<string | null>(null);
 
   const allStrokesRef = useRef<{ x: number[], y: number[] }>({ x: [], y: [] });
   const currentStrokeRef = useRef<{ x: number[], y: number[] }>({ x: [], y: [] });
@@ -52,7 +53,7 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     ctx.strokeStyle = '#FFFFFF';
-    ctx.lineWidth = 18; // Kuas tebal dan jelas untuk kemudahan OCR ML Kit & AI
+    ctx.lineWidth = 18; 
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
   }, []);
@@ -95,6 +96,7 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
     ctx.beginPath();
     ctx.moveTo(x, y);
     setIsDrawing(true);
+    setWarningMessage(null); // Sembunyikan peringatan sebelumnya saat mulai melukis
 
     currentStrokeRef.current = { x: [x], y: [y] };
     allStrokesRef.current.x.push(x);
@@ -127,7 +129,6 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
     if (!isDrawing) return;
     setIsDrawing(false);
     
-    // Kirim setiap goresan ke model Google ML Kit Digital Ink Recognition
     const strokeData = {
       x: [...currentStrokeRef.current.x],
       y: [...currentStrokeRef.current.y]
@@ -151,6 +152,7 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
 
     setPrediction(null);
     setActiveEngine("");
+    setWarningMessage(null);
     allStrokesRef.current = { x: [], y: [] };
     currentStrokeRef.current = { x: [], y: [] };
     
@@ -163,7 +165,7 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
 
   const handlePredict = useCallback(async () => {
     if (allStrokesRef.current.x.length === 0) {
-      alert("Kamu belum melukis angka di kanvas! Yuk lukis jawabanmu dahulu.");
+      setWarningMessage("Kamu belum melukis angka di kanvas! Yuk lukis jawabanmu dahulu.");
       return;
     }
 
@@ -173,14 +175,14 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
     if (!ctx) return;
 
     setIsModelLoading(true);
+    setWarningMessage(null);
+    setPrediction(null);
 
     try {
       let finalDigit: number | null = null;
       let usedEngine = "";
 
-      // 1. UTAMAKAN GOOGLE ML KIT DIGITAL INK RECOGNITION + LOOKALIKE DIGIT NORMALIZATION
-      // Model en-US ML Kit terkadang mengembalikan huruf mirip angka (seperti O untuk 0, S untuk 5, l untuk 1, Z untuk 2)
-      // Normalisasi ini meningkatkan akurasi pembacaan angka anak hingga 100% sesuai tulisan pengguna.
+      // Lookalike digit normalization untuk model Google ML Kit
       const lookalikeMap: Record<string, number> = {
         "O": 0, "o": 0, "D": 0,
         "l": 1, "I": 1, "i": 1, "|": 1,
@@ -194,6 +196,7 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
         "g": 9, "q": 9, "P": 9
       };
 
+      // 1. UTAMAKAN GOOGLE ML KIT DIGITAL INK RECOGNITION (Hanya ambil 2 kandidat teratas agar tidak menebak simbol/doodle)
       const mlKitPromise = new Promise<number | null>(async (resolve) => {
         try {
           const writingArea = { w: canvas.width, h: canvas.height };
@@ -203,9 +206,13 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
           });
 
           if (response && response.results && response.results.candidates && response.results.candidates.length > 0) {
-            // Prioritas 1: Cari kandidat angka tunggal murni (0-9)
-            for (const candidate of response.results.candidates) {
-              const match = candidate.match(/^\d$/);
+            // Kita HANYA memeriksa 2 kandidat dengan keyakinan (confidence) tertinggi!
+            // Jika kedua kandidat teratas bukan angka 0-9 atau huruf mirip angka, maka coretan dianggap bukan angka dan ditolak.
+            const topCandidates = response.results.candidates.slice(0, 2);
+
+            for (const candidate of topCandidates) {
+              const cleaned = candidate.trim();
+              const match = cleaned.match(/^\d$/);
               if (match) {
                 const predictedDigit = parseInt(match[0], 10);
                 if (!isNaN(predictedDigit) && predictedDigit >= 0 && predictedDigit <= 9) {
@@ -213,24 +220,10 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
                   return;
                 }
               }
-            }
-
-            // Prioritas 2: Cek kandidat pertama apakah merupakan huruf mirip angka (Lookalike)
-            const firstCand = response.results.candidates[0].trim();
-            if (firstCand.length === 1 && lookalikeMap[firstCand] !== undefined) {
-              resolve(lookalikeMap[firstCand]);
-              return;
-            }
-
-            // Prioritas 3: Cari angka apapun di dalam string kandidat
-            for (const candidate of response.results.candidates) {
-              const match = candidate.match(/\d/);
-              if (match) {
-                const predictedDigit = parseInt(match[0], 10);
-                if (!isNaN(predictedDigit) && predictedDigit >= 0 && predictedDigit <= 9) {
-                  resolve(predictedDigit);
-                  return;
-                }
+              // Cek apakah kandidat teratas merupakan lookalike angka
+              if (cleaned.length === 1 && lookalikeMap[cleaned] !== undefined) {
+                resolve(lookalikeMap[cleaned]);
+                return;
               }
             }
           }
@@ -247,35 +240,37 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
         finalDigit = mlKitDigit;
         usedEngine = "Google ML Kit Digital Ink Recognition";
       } else {
-        // 2. Jika Google ML Kit tidak tersedia (misal saat dibuka di Browser Web),
-        // gunakan Google Gemini Vision API atau Center-of-Mass 28x28 MNIST Fallback
-        try {
-          const base64Image = canvas.toDataURL("image/png");
-          const res = await fetch("/api/ai/recognize-canvas", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ image: base64Image }),
-          });
-          if (res.ok) {
-            const data = await res.json();
-            if (data.success && typeof data.digit === "number" && data.digit >= 0 && data.digit <= 9) {
-              finalDigit = data.digit;
-              usedEngine = data.engine || "Google Gemini 2.5 Flash Vision AI";
+        // 2. Jika Google ML Kit menolak (coretan tidak seperti angka) atau tidak tersedia di Web,
+        // periksa ke Center-of-Mass 28x28 MNIST Recognizer yang sudah dilengkapi Strict Quality Gate
+        const localResult = recognizeDigitFromCanvasPixels(ctx, canvas.width, canvas.height);
+        if (localResult) {
+          finalDigit = localResult.digit;
+          usedEngine = localResult.engine;
+        } else {
+          // Coba validasi ke Google Gemini Vision API (jika terhubung di backend)
+          try {
+            const base64Image = canvas.toDataURL("image/png");
+            const res = await fetch("/api/ai/recognize-canvas", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ image: base64Image }),
+            });
+            if (res.ok) {
+              const data = await res.json();
+              if (data.success && typeof data.digit === "number" && data.digit >= 0 && data.digit <= 9) {
+                finalDigit = data.digit;
+                usedEngine = data.engine || "Google Gemini 2.5 Flash Vision AI";
+              }
             }
-          }
-        } catch {
-          // Fallback lokal di bawah
-        }
-
-        if (finalDigit === null) {
-          const localResult = recognizeDigitFromCanvasPixels(ctx, canvas.width, canvas.height);
-          if (localResult) {
-            finalDigit = localResult.digit;
-            usedEngine = localResult.engine;
+          } catch {
+            // Tetap null
           }
         }
       }
 
+      // KEPUTUSAN AKHIR:
+      // Jika hasil angka sah (0-9), kirim jawaban.
+      // JIKA TIDAK SAH (coretan asal-asalan / bukan angka), berikan peringatan jelas dan JANGAN kirim jawaban salah!
       if (finalDigit !== null && finalDigit >= 0 && finalDigit <= 9) {
         setPrediction(finalDigit);
         setActiveEngine(usedEngine);
@@ -283,17 +278,11 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
           onPredict(finalDigit);
         }
       } else {
-        alert("Coretan belum jelas. Coba lukis angkanya sekali lagi ya!");
+        setWarningMessage("⚠️ Coretanmu tidak terlihat seperti angka pada umumnya (0-9). Yuk hapus lalu lukis angka yang jelas & rapi di tengah kanvas ya!");
       }
     } catch (error) {
       console.error("Error recognizing canvas:", error);
-      const fallback = recognizeDigitFromCanvasPixels(ctx, canvas.width, canvas.height);
-      const fallbackDigit = fallback ? fallback.digit : 0;
-      setPrediction(fallbackDigit);
-      setActiveEngine(fallback ? fallback.engine : "Fallback MNIST Engine");
-      if (onPredict) {
-        onPredict(fallbackDigit);
-      }
+      setWarningMessage("⚠️ AI kesulitan membaca coretanmu. Coba hapus lalu lukis angka 0 sampai 9 yang lebih tebal dan jelas ya!");
     } finally {
       setIsModelLoading(false);
     }
@@ -347,6 +336,14 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
         )}
       </div>
 
+      {warningMessage && (
+        <div className="w-full mt-1 p-3.5 bg-amber-500/20 border-2 border-amber-400 rounded-2xl text-center animate-shake flex flex-col items-center gap-1 shadow-lg">
+          <span className="text-xs sm:text-sm font-black text-amber-300 leading-relaxed">
+            {warningMessage}
+          </span>
+        </div>
+      )}
+
       {showButtons && (
         <div className="flex items-center justify-between w-full gap-2.5 sm:gap-3 pt-1">
           <button
@@ -368,7 +365,7 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
         </div>
       )}
 
-      {prediction !== null && (
+      {prediction !== null && !warningMessage && (
         <div className="w-full mt-1 p-3 bg-emerald-500/20 border-2 border-emerald-400 rounded-2xl text-center animate-bounce flex flex-col items-center gap-1">
           <div>
             <span className="text-xs font-bold text-emerald-300">Hasil Pembacaan AI:</span>
