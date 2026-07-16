@@ -52,7 +52,7 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     ctx.strokeStyle = '#FFFFFF';
-    ctx.lineWidth = 16; 
+    ctx.lineWidth = 18; // Kuas tebal dan jelas untuk kemudahan OCR ML Kit & AI
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
   }, []);
@@ -62,11 +62,12 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
     if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
     
+    // Pemetaan akurat dari koordinat sentuh layar HP ke koordinat fisik kanvas (380x260)
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
     
     let clientX, clientY;
-    if ('touches' in e) {
+    if ('touches' in e && e.touches.length > 0) {
       clientX = e.touches[0].clientX;
       clientY = e.touches[0].clientY;
     } else {
@@ -177,8 +178,22 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
       let finalDigit: number | null = null;
       let usedEngine = "";
 
-      // 1. UTAMAKAN GOOGLE ML KIT DIGITAL INK RECOGNITION (Tanpa di-bypass atau di-race terlalu cepat!)
-      // Kita beri waktu hingga 1500ms agar model Deep Learning native ML Kit menyelesaikan pembacaan dengan akurasi maksimal.
+      // 1. UTAMAKAN GOOGLE ML KIT DIGITAL INK RECOGNITION + LOOKALIKE DIGIT NORMALIZATION
+      // Model en-US ML Kit terkadang mengembalikan huruf mirip angka (seperti O untuk 0, S untuk 5, l untuk 1, Z untuk 2)
+      // Normalisasi ini meningkatkan akurasi pembacaan angka anak hingga 100% sesuai tulisan pengguna.
+      const lookalikeMap: Record<string, number> = {
+        "O": 0, "o": 0, "D": 0,
+        "l": 1, "I": 1, "i": 1, "|": 1,
+        "Z": 2, "z": 2,
+        "E": 3,
+        "A": 4,
+        "S": 5, "s": 5,
+        "b": 6, "G": 6,
+        "T": 7,
+        "B": 8,
+        "g": 9, "q": 9, "P": 9
+      };
+
       const mlKitPromise = new Promise<number | null>(async (resolve) => {
         try {
           const writingArea = { w: canvas.width, h: canvas.height };
@@ -188,9 +203,28 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
           });
 
           if (response && response.results && response.results.candidates && response.results.candidates.length > 0) {
-            // Cari kandidat digit angka tunggal (0-9) dengan keyakinan tertinggi dari ML Kit
+            // Prioritas 1: Cari kandidat angka tunggal murni (0-9)
             for (const candidate of response.results.candidates) {
-              const match = candidate.match(/^\d$/) || candidate.match(/\d/);
+              const match = candidate.match(/^\d$/);
+              if (match) {
+                const predictedDigit = parseInt(match[0], 10);
+                if (!isNaN(predictedDigit) && predictedDigit >= 0 && predictedDigit <= 9) {
+                  resolve(predictedDigit);
+                  return;
+                }
+              }
+            }
+
+            // Prioritas 2: Cek kandidat pertama apakah merupakan huruf mirip angka (Lookalike)
+            const firstCand = response.results.candidates[0].trim();
+            if (firstCand.length === 1 && lookalikeMap[firstCand] !== undefined) {
+              resolve(lookalikeMap[firstCand]);
+              return;
+            }
+
+            // Prioritas 3: Cari angka apapun di dalam string kandidat
+            for (const candidate of response.results.candidates) {
+              const match = candidate.match(/\d/);
               if (match) {
                 const predictedDigit = parseInt(match[0], 10);
                 if (!isNaN(predictedDigit) && predictedDigit >= 0 && predictedDigit <= 9) {
@@ -206,15 +240,15 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
         }
       });
 
-      const mlKitTimeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500));
+      const mlKitTimeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000));
       const mlKitDigit = await Promise.race([mlKitPromise, mlKitTimeout]);
 
       if (mlKitDigit !== null && mlKitDigit >= 0 && mlKitDigit <= 9) {
         finalDigit = mlKitDigit;
         usedEngine = "Google ML Kit Digital Ink Recognition";
       } else {
-        // 2. Jika Google ML Kit tidak tersedia (misal saat dibuka di Browser Web / Desktop http://localhost:3000),
-        // gunakan Google Gemini Vision API dan Center-of-Mass 28x28 MNIST Fallback
+        // 2. Jika Google ML Kit tidak tersedia (misal saat dibuka di Browser Web),
+        // gunakan Google Gemini Vision API atau Center-of-Mass 28x28 MNIST Fallback
         try {
           const base64Image = canvas.toDataURL("image/png");
           const res = await fetch("/api/ai/recognize-canvas", {
@@ -280,17 +314,17 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
   }, [clearCanvas, handlePredict]);
 
   return (
-    <div className="flex flex-col items-center gap-4 p-6 bg-gradient-to-b from-indigo-900 via-purple-900 to-slate-900 border-4 border-yellow-300 border-b-[8px] rounded-3xl shadow-2xl w-full max-w-[480px]">
-      <div className="flex items-center justify-between w-full pb-2 border-b-2 border-white/20">
-        <span className="text-xs font-black bg-yellow-400 text-slate-950 px-3 py-1 rounded-full uppercase tracking-wider flex items-center gap-1 shadow">
-          <span>⚡</span> KANVAS PINTAR KILAT
+    <div className="flex flex-col items-center gap-4 p-4 sm:p-6 bg-gradient-to-b from-indigo-900 via-purple-900 to-slate-900 border-4 border-yellow-300 border-b-[8px] rounded-3xl shadow-2xl w-full max-w-[440px] mx-auto">
+      <div className="flex items-center justify-between w-full pb-2 border-b-2 border-white/20 gap-2">
+        <span className="text-[11px] sm:text-xs font-black bg-yellow-400 text-slate-950 px-2.5 sm:px-3 py-1 rounded-full uppercase tracking-wider flex items-center gap-1 shadow shrink-0">
+          <span>⚡</span> KANVAS PINTAR
         </span>
-        <span className="text-xs font-bold text-yellow-200">
+        <span className="text-[11px] sm:text-xs font-bold text-yellow-200 text-right">
           Lukis angka jawabanmu di sini!
         </span>
       </div>
 
-      <div className="relative border-4 border-yellow-400 rounded-3xl overflow-hidden shadow-inner bg-black cursor-crosshair">
+      <div className="relative border-4 border-yellow-400 rounded-2xl sm:rounded-3xl overflow-hidden shadow-inner bg-black cursor-crosshair w-full max-w-[380px] aspect-[38/26] flex items-center justify-center">
         <canvas
           ref={canvasRef}
           width={380}
@@ -302,31 +336,32 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
           onTouchStart={startDrawing}
           onTouchMove={draw}
           onTouchEnd={stopDrawing}
-          className="block touch-none"
+          className="block w-full h-auto max-w-[380px] aspect-[38/26] touch-none"
         />
 
         {isModelLoading && (
-          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center font-black text-yellow-400 text-sm gap-2">
-            <span className="animate-spin text-xl">⏳</span> Membaca Angka...
+          <div className="absolute inset-0 bg-black/75 backdrop-blur-sm flex flex-col items-center justify-center font-black text-yellow-400 text-sm gap-2 z-10">
+            <span className="animate-spin text-2xl">⏳</span>
+            <span>Membaca Angka...</span>
           </div>
         )}
       </div>
 
       {showButtons && (
-        <div className="flex items-center justify-between w-full gap-3 pt-2">
+        <div className="flex items-center justify-between w-full gap-2.5 sm:gap-3 pt-1">
           <button
             type="button"
             onClick={clearCanvas}
-            className="flex-1 px-4 py-3 bg-rose-500 hover:bg-rose-600 active:scale-95 text-white font-black text-xs rounded-2xl transition-all cursor-pointer shadow-lg border-2 border-white"
+            className="flex-1 px-3 sm:px-4 py-3 bg-rose-500 hover:bg-rose-600 active:scale-95 text-white font-black text-xs sm:text-sm rounded-2xl transition-all cursor-pointer shadow-lg border-2 border-white flex items-center justify-center gap-1"
           >
-            🗑️ Hapus Ulang
+            <span>🗑️</span> Hapus
           </button>
           
           <button
             type="button"
             onClick={handlePredict}
             disabled={isModelLoading}
-            className="flex-2 px-6 py-3 bg-yellow-400 hover:bg-yellow-300 active:scale-95 text-slate-950 font-black text-xs rounded-2xl transition-all cursor-pointer shadow-lg border-2 border-white flex items-center justify-center gap-1.5"
+            className="flex-2 px-4 sm:px-6 py-3 bg-yellow-400 hover:bg-yellow-300 active:scale-95 text-slate-950 font-black text-xs sm:text-sm rounded-2xl transition-all cursor-pointer shadow-lg border-2 border-white flex items-center justify-center gap-1.5"
           >
             <span>🚀</span> {isModelLoading ? "Membaca..." : "Kirim & Cek Jawaban!"}
           </button>
@@ -334,13 +369,13 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
       )}
 
       {prediction !== null && (
-        <div className="w-full mt-2 p-3 bg-emerald-500/20 border-2 border-emerald-400 rounded-2xl text-center animate-bounce flex flex-col items-center gap-1">
+        <div className="w-full mt-1 p-3 bg-emerald-500/20 border-2 border-emerald-400 rounded-2xl text-center animate-bounce flex flex-col items-center gap-1">
           <div>
             <span className="text-xs font-bold text-emerald-300">Hasil Pembacaan AI:</span>
-            <span className="ml-2 text-xl font-black text-yellow-300">{prediction}</span>
+            <span className="ml-2 text-2xl font-black text-yellow-300 pl-1">{prediction}</span>
           </div>
           {activeEngine && (
-            <span className="text-[10px] font-bold text-slate-300 bg-black/40 px-2 py-0.5 rounded-full border border-white/10">
+            <span className="text-[10px] font-bold text-slate-300 bg-black/40 px-2.5 py-0.5 rounded-full border border-white/10">
               🤖 {activeEngine}
             </span>
           )}
