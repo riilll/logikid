@@ -244,10 +244,20 @@ export default function DashboardOrtu() {
           <div className="flex items-center gap-3">
             <Link
               href="/pilih-profil"
-              className="text-xs font-bold bg-white/5 hover:bg-white/10 text-white px-4 py-2.5 border border-white/10 rounded-xl transition-all cursor-pointer flex items-center gap-2 shadow-sm"
+              className="text-xs font-black bg-yellow-400 hover:bg-yellow-300 text-slate-950 px-4 py-2.5 rounded-xl transition-all cursor-pointer flex items-center gap-2 shadow-sm"
             >
-              <span>←</span> Kembali Pilih Profil
+              <span>←</span> Gerbang Role & Karakter
             </Link>
+            
+            <button
+              onClick={() => {
+                db.logout();
+                window.location.href = "/";
+              }}
+              className="text-xs font-bold bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 px-4 py-2.5 border border-rose-500/30 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
+            >
+              <span>🚪</span> Keluar Akun
+            </button>
           </div>
         </header>
 
@@ -952,12 +962,13 @@ export default function DashboardOrtu() {
 
                     <button
                       onClick={() => {
-                        db.setActiveChild(selectedChildId);
-                        window.location.href = `/quiz?remedial_question=${encodeURIComponent(attempt.soal)}&remedial_answer=${attempt.jawaban_benar}&attempt_id=${attempt.id}`;
+                        db.markAttemptResolved(attempt.id);
+                        loadAnalytics(selectedChildId);
+                        showToast("✅ Catatan salah berhasil dievaluasi dan ditandai selesai.");
                       }}
-                      className="w-full sm:w-auto px-5 py-2.5 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-500 hover:to-amber-600 text-slate-900 font-black rounded-xl text-xs active:scale-95 transition-all cursor-pointer shadow shadow-amber-500/20 whitespace-nowrap"
+                      className="w-full sm:w-auto px-5 py-2.5 bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-slate-950 font-black rounded-xl text-xs transition-all cursor-pointer shadow shadow-emerald-500/20 whitespace-nowrap flex items-center justify-center gap-1.5"
                     >
-                      ✏️ Coba Lagi! (Remedial)
+                      <span>✅</span> Tandai Sudah Paham & Selesai
                     </button>
                   </div>
                 ))}

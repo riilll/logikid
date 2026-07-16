@@ -2,6 +2,7 @@ export interface User {
   id: string;
   nama: string;
   email: string;
+  password?: string;
   created_at: string;
 }
 
@@ -54,6 +55,7 @@ const DEFAULT_USER: User = {
   id: "user-1111-2222-3333-444444444444",
   nama: "Fahril",
   email: "fahril@email.com",
+  password: "password123",
   created_at: new Date().toISOString(),
 };
 
@@ -527,6 +529,41 @@ class MockDatabase {
     return users.find((u) => u.email.toLowerCase() === email.toLowerCase()) || null;
   }
 
+  registerUser(nama: string, email: string, password?: string): { user?: User; error?: string } {
+    const existing = this.getUserByEmail(email);
+    if (existing) {
+      return { error: "Email ini sudah terdaftar. Silakan login menggunakan email & password Anda." };
+    }
+
+    const users = this.getUsers();
+    const newUser: User = {
+      id: "user-" + Math.random().toString(36).substr(2, 9),
+      nama: nama.trim(),
+      email: email.trim().toLowerCase(),
+      password: password || "password123",
+      created_at: new Date().toISOString(),
+    };
+    users.push(newUser);
+    this.setData("logikid_users", users);
+
+    // Otomatis buatkan 1 profil anak awal agar siap dipakai (bisa ditambah lagi karena anak bisa lebih dari 1)
+    this.addChild(newUser.id, "Anak Pertama", 7, "Kelas 1", "🐻", "space");
+
+    return { user: newUser };
+  }
+
+  loginUser(email: string, password?: string): { user?: User; error?: string } {
+    const user = this.getUserByEmail(email);
+    if (!user) {
+      return { error: "Akun dengan email tersebut tidak ditemukan. Silakan daftar terlebih dahulu." };
+    }
+    // Jika user punya password dan input password diberikan, periksa validitasnya
+    if (user.password && password && user.password !== password) {
+      return { error: "Password salah! Silakan periksa kembali kata sandi Anda." };
+    }
+    return { user };
+  }
+
   // Children Profiles
   getChildren(userId: string): ChildProfile[] {
     const children = this.getData<ChildProfile>("logikid_children");
@@ -748,6 +785,10 @@ class MockDatabase {
     const attempts = this.getData<QuizAttempt>("logikid_attempts");
     const filtered = attempts.filter((a) => a.id !== attemptId);
     this.setData("logikid_attempts", filtered);
+  }
+
+  markAttemptResolved(attemptId: string): void {
+    this.deleteAttempt(attemptId);
   }
 
   // Rewards
