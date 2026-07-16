@@ -180,12 +180,12 @@ export default function DashboardAnak() {
                 Pilih Petualangan Belajarmu Hari Ini!
               </h2>
               <p className="text-xs text-yellow-300 font-extrabold mt-0.5">
-                ✨ Semua soal disesuaikan otomatis dengan tingkat kesulitan dari Ayah & Bunda
+                ✨ Tingkat Kesulitan dari Orang Tua: <strong className="text-white uppercase underline">{(child?.preferred_level || 'mudah')}</strong> (Soal disesuaikan otomatis)
               </p>
             </div>
           </div>
           <span className="text-xs font-black bg-yellow-400 text-slate-950 px-4 py-2 rounded-2xl border border-white shadow-sm self-center">
-            🎯 Siap Menang Bintang!
+            🎯 Level: {(child?.preferred_level || 'mudah').toUpperCase()}
           </span>
         </div>
         

@@ -75,13 +75,33 @@ function QuizContent() {
     return () => clearTimeout(timer);
   }, [loadQuestionsForChild, router]);
 
-  // Speech Synthesizer for Story / Podcast mode
-  const speakStory = (text: string) => {
+  // Speech Synthesizer for Story / Podcast mode (Suara Narrator Bahasa Indonesia)
+  const speakStory = useCallback((text: string) => {
     if (typeof window !== "undefined" && window.speechSynthesis) {
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = "id-ID";
-      utterance.rate = 0.8;
+      
+      // Cari dan pilih suara narrator khusus Bahasa Indonesia agar intonasi jelas dan tidak berlogat Inggris
+      const voices = window.speechSynthesis.getVoices();
+      const indonesianVoice = voices.find(
+        (v) =>
+          v.lang.toLowerCase().includes("id-id") ||
+          v.lang.toLowerCase().includes("in-id") ||
+          v.lang.toLowerCase() === "id" ||
+          v.name.toLowerCase().includes("indonesia") ||
+          v.name.toLowerCase().includes("gadis") ||
+          v.name.toLowerCase().includes("ardian") ||
+          v.name.toLowerCase().includes("damayanti")
+      );
+
+      if (indonesianVoice) {
+        utterance.voice = indonesianVoice;
+        utterance.lang = indonesianVoice.lang;
+      } else {
+        utterance.lang = "id-ID";
+      }
+
+      utterance.rate = 0.85; // Intonasi jelas dan mudah dipahami anak
       
       utterance.onstart = () => setIsAudioPlaying(true);
       utterance.onend = () => setIsAudioPlaying(false);
@@ -89,7 +109,17 @@ function QuizContent() {
       
       window.speechSynthesis.speak(utterance);
     }
-  };
+  }, []);
+
+  // Pastikan daftar suara TTS dimuat di Chrome/Edge/Android
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.speechSynthesis) {
+      window.speechSynthesis.getVoices();
+      window.speechSynthesis.onvoiceschanged = () => {
+        window.speechSynthesis.getVoices();
+      };
+    }
+  }, []);
 
   useEffect(() => {
     if (questions.length > 0 && category === "soal_cerita" && status === "playing") {
@@ -231,11 +261,11 @@ function QuizContent() {
         </div>
 
         {/* Level & Points Pill */}
-        <div className="flex items-center gap-3">
-          <span className="hidden sm:inline text-xs font-black uppercase px-3 py-1 rounded-xl bg-indigo-950/90 text-yellow-300 border-2 border-yellow-400 shadow-sm">
-            Level: {(child.preferred_level || "mudah").toUpperCase()}
+        <div className="flex items-center gap-2 sm:gap-3">
+          <span className="inline-flex text-[11px] sm:text-xs font-black uppercase px-2.5 sm:px-3 py-1 rounded-xl bg-indigo-950/90 text-yellow-300 border-2 border-yellow-400 shadow-sm">
+            Level: {(activeQuestion?.level || child.preferred_level || "mudah").toUpperCase()}
           </span>
-          <span className="text-sm sm:text-base font-black text-slate-950 bg-yellow-400 border-2 border-white px-4 py-1.5 rounded-2xl shadow-md flex items-center gap-1 animate-pulse">
+          <span className="text-xs sm:text-base font-black text-slate-950 bg-yellow-400 border-2 border-white px-3 sm:px-4 py-1.5 rounded-2xl shadow-md flex items-center gap-1 animate-pulse">
             <span>⭐️</span>
             <span>{pointsEarned} Poin</span>
           </span>

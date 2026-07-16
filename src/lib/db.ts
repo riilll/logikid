@@ -657,10 +657,7 @@ class MockDatabase {
     if (childId) {
       const child = this.getChildById(childId);
       if (child && child.preferred_level && child.preferred_level !== "semua") {
-        const levelFiltered = filtered.filter((q) => q.level === child.preferred_level);
-        if (levelFiltered.length > 0) {
-          filtered = levelFiltered;
-        }
+        filtered = filtered.filter((q) => q.level === child.preferred_level);
       }
     }
 
