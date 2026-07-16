@@ -78,36 +78,48 @@ function QuizContent() {
   // Speech Synthesizer for Story / Podcast mode (Suara Narrator Bahasa Indonesia)
   const speakStory = useCallback((text: string) => {
     if (typeof window !== "undefined" && window.speechSynthesis) {
+      // Batalkan ucapan sebelumnya
       window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      
-      // Cari dan pilih suara narrator khusus Bahasa Indonesia agar intonasi jelas dan tidak berlogat Inggris
-      const voices = window.speechSynthesis.getVoices();
-      const indonesianVoice = voices.find(
-        (v) =>
-          v.lang.toLowerCase().includes("id-id") ||
-          v.lang.toLowerCase().includes("in-id") ||
-          v.lang.toLowerCase() === "id" ||
-          v.name.toLowerCase().includes("indonesia") ||
-          v.name.toLowerCase().includes("gadis") ||
-          v.name.toLowerCase().includes("ardian") ||
-          v.name.toLowerCase().includes("damayanti")
-      );
-
-      if (indonesianVoice) {
-        utterance.voice = indonesianVoice;
-        utterance.lang = indonesianVoice.lang;
-      } else {
-        utterance.lang = "id-ID";
+      if (window.speechSynthesis.paused) {
+        window.speechSynthesis.resume();
       }
 
-      utterance.rate = 0.85; // Intonasi jelas dan mudah dipahami anak
-      
-      utterance.onstart = () => setIsAudioPlaying(true);
-      utterance.onend = () => setIsAudioPlaying(false);
-      utterance.onerror = () => setIsAudioPlaying(false);
-      
-      window.speechSynthesis.speak(utterance);
+      // Gunakan jeda 80ms untuk mencegah race condition bug di Chrome & Android WebView (di mana cancel langsung speak menyebabkan suara terbungkam)
+      setTimeout(() => {
+        const utterance = new SpeechSynthesisUtterance(text);
+        
+        // Cari dan pilih suara narrator khusus Bahasa Indonesia agar intonasi jelas
+        const voices = window.speechSynthesis.getVoices();
+        let indonesianVoice = voices.find(
+          (v) =>
+            v.lang.toLowerCase().includes("id-id") ||
+            v.lang.toLowerCase().includes("in-id") ||
+            v.lang.toLowerCase() === "id" ||
+            v.name.toLowerCase().includes("indonesia") ||
+            v.name.toLowerCase().includes("gadis") ||
+            v.name.toLowerCase().includes("ardian") ||
+            v.name.toLowerCase().includes("damayanti")
+        );
+
+        if (!indonesianVoice) {
+          indonesianVoice = voices.find((v) => v.lang.toLowerCase().startsWith("id"));
+        }
+
+        if (indonesianVoice) {
+          utterance.voice = indonesianVoice;
+          utterance.lang = indonesianVoice.lang;
+        } else {
+          utterance.lang = "id-ID";
+        }
+
+        utterance.rate = 0.85; // Intonasi jelas dan mudah dipahami anak SD
+        
+        utterance.onstart = () => setIsAudioPlaying(true);
+        utterance.onend = () => setIsAudioPlaying(false);
+        utterance.onerror = () => setIsAudioPlaying(false);
+        
+        window.speechSynthesis.speak(utterance);
+      }, 80);
     }
   }, []);
 
