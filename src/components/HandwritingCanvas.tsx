@@ -196,7 +196,7 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
         "g": 9, "q": 9, "P": 9
       };
 
-      // 1. UTAMAKAN GOOGLE ML KIT DIGITAL INK RECOGNITION (Hanya ambil 2 kandidat teratas agar tidak menebak simbol/doodle)
+      // 1. UTAMAKAN GOOGLE ML KIT DIGITAL INK RECOGNITION (Mendukung angka tunggal maupun multi-digit seperti 15, 24, 42, 100)
       const mlKitPromise = new Promise<number | null>(async (resolve) => {
         try {
           const writingArea = { w: canvas.width, h: canvas.height };
@@ -206,24 +206,30 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
           });
 
           if (response && response.results && response.results.candidates && response.results.candidates.length > 0) {
-            // Kita HANYA memeriksa 2 kandidat dengan keyakinan (confidence) tertinggi!
-            // Jika kedua kandidat teratas bukan angka 0-9 atau huruf mirip angka, maka coretan dianggap bukan angka dan ditolak.
-            const topCandidates = response.results.candidates.slice(0, 2);
+            // Kita memeriksa 4 kandidat teratas dari Google ML Kit agar multi-digit maupun tunggal terbaca akurat
+            const topCandidates = response.results.candidates.slice(0, 4);
 
             for (const candidate of topCandidates) {
               const cleaned = candidate.trim();
-              const match = cleaned.match(/^\d$/);
+              
+              // Peta lookalike untuk setiap karakter dalam string (baik 1 digit seperti "S" -> "5", atau multi-digit seperti "l5" -> "15" atau "4o" -> "40")
+              let normalizedStr = "";
+              for (const char of cleaned) {
+                if (lookalikeMap[char] !== undefined) {
+                  normalizedStr += lookalikeMap[char];
+                } else {
+                  normalizedStr += char;
+                }
+              }
+
+              // Cari angka murni (baik 1 digit maupun lebih dari 1 digit, misal "6", "15", "42", "100")
+              const match = normalizedStr.match(/^\d+$/);
               if (match) {
                 const predictedDigit = parseInt(match[0], 10);
-                if (!isNaN(predictedDigit) && predictedDigit >= 0 && predictedDigit <= 9) {
+                if (!isNaN(predictedDigit) && predictedDigit >= 0 && predictedDigit <= 9999) {
                   resolve(predictedDigit);
                   return;
                 }
-              }
-              // Cek apakah kandidat teratas merupakan lookalike angka
-              if (cleaned.length === 1 && lookalikeMap[cleaned] !== undefined) {
-                resolve(lookalikeMap[cleaned]);
-                return;
               }
             }
           }
@@ -236,7 +242,7 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
       const mlKitTimeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000));
       const mlKitDigit = await Promise.race([mlKitPromise, mlKitTimeout]);
 
-      if (mlKitDigit !== null && mlKitDigit >= 0 && mlKitDigit <= 9) {
+      if (mlKitDigit !== null && mlKitDigit >= 0 && mlKitDigit <= 9999) {
         finalDigit = mlKitDigit;
         usedEngine = "Google ML Kit Digital Ink Recognition";
       } else {
@@ -257,7 +263,7 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
             });
             if (res.ok) {
               const data = await res.json();
-              if (data.success && typeof data.digit === "number" && data.digit >= 0 && data.digit <= 9) {
+              if (data.success && typeof data.digit === "number" && data.digit >= 0 && data.digit <= 9999) {
                 finalDigit = data.digit;
                 usedEngine = data.engine || "Google Gemini 2.5 Flash Vision AI";
               }
@@ -269,20 +275,20 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
       }
 
       // KEPUTUSAN AKHIR:
-      // Jika hasil angka sah (0-9), kirim jawaban.
+      // Jika hasil angka sah (0-9999), kirim jawaban.
       // JIKA TIDAK SAH (coretan asal-asalan / bukan angka), berikan peringatan jelas dan JANGAN kirim jawaban salah!
-      if (finalDigit !== null && finalDigit >= 0 && finalDigit <= 9) {
+      if (finalDigit !== null && finalDigit >= 0 && finalDigit <= 9999) {
         setPrediction(finalDigit);
         setActiveEngine(usedEngine);
         if (onPredict) {
           onPredict(finalDigit);
         }
       } else {
-        setWarningMessage("⚠️ Coretanmu tidak terlihat seperti angka pada umumnya (0-9). Yuk hapus lalu lukis angka yang jelas & rapi di tengah kanvas ya!");
+        setWarningMessage("⚠️ Coretanmu tidak terlihat seperti angka pada umumnya. Yuk hapus lalu lukis angka jawabanmu yang jelas & rapi di tengah kanvas ya!");
       }
     } catch (error) {
       console.error("Error recognizing canvas:", error);
-      setWarningMessage("⚠️ AI kesulitan membaca coretanmu. Coba hapus lalu lukis angka 0 sampai 9 yang lebih tebal dan jelas ya!");
+      setWarningMessage("⚠️ AI kesulitan membaca coretanmu. Coba hapus lalu lukis angka yang lebih tebal dan jelas ya!");
     } finally {
       setIsModelLoading(false);
     }

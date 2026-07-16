@@ -20,17 +20,17 @@ export async function POST(req: NextRequest) {
     // 1. Coba gunakan Google Gemini 2.5 Flash Multimodal Vision API jika GEMINI_API_KEY tersedia
     if (apiKey) {
       try {
-        const prompt = `Perhatikan gambar coretan angka tulisan tangan anak usia SD (0 sampai 9) pada kanvas hitam berikut dengan sangat teliti.
-Tentukan angka tunggal apa (dari 0 sampai 9) yang terlukis di gambar tersebut.
+        const prompt = `Perhatikan gambar coretan angka tulisan tangan anak usia SD (0 sampai 9999) pada kanvas hitam berikut dengan sangat teliti.
+Tentukan angka berapa (baik 1 digit, 2 digit, atau lebih) yang terlukis di gambar tersebut.
 Perhatikan dengan sangat akurat perbedaan kritis berikut:
 - Angka 6 vs 8: Angka 6 memiliki loop di bawah dan garis meluncur dari atas kiri, bagian kanan atasnya terbuka/kosong. Angka 8 memiliki dua loop (atas dan bawah tertutup).
 - Angka 9 vs 8: Angka 9 memiliki loop di atas dan tiang turun ke bawah, bagian kiri bawahnya terbuka/kosong.
 - Angka 0 vs 8: Angka 0 adalah satu lingkaran besar dengan lubang kosong di tengah, sedangkan angka 8 bersilang padat di tengah.
-- Angka 4 vs 7 vs 1.
+- Angka multi-digit (misal 15, 24, 42, 100): periksa setiap angka dari kiri ke kanan dengan rapi.
 
 Keluarkan HANYA format JSON murni:
 {
-  "digit": <number 0-9>,
+  "digit": <number 0-9999>,
   "confidence": <number 0.0 - 1.0>,
   "reason": "..."
 }`;
@@ -67,7 +67,7 @@ Keluarkan HANYA format JSON murni:
           const textOutput = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
           if (textOutput) {
             const parsed = JSON.parse(textOutput.replace(/```json|```/g, "").trim());
-            if (typeof parsed.digit === "number" && parsed.digit >= 0 && parsed.digit <= 9) {
+            if (typeof parsed.digit === "number" && parsed.digit >= 0 && parsed.digit <= 9999) {
               return NextResponse.json({
                 success: true,
                 digit: parsed.digit,
