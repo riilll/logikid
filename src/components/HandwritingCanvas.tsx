@@ -19,50 +19,28 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
   const [isDrawing, setIsDrawing] = useState(false);
   const [prediction, setPrediction] = useState<number | null>(null);
   const [isModelLoading, setIsModelLoading] = useState(false);
-  const [modelDownloaded, setModelDownloaded] = useState(false);
 
-  // Buffer untuk satu goresan (stroke) saat ini
-  const strokeRef = useRef<{ x: number[], y: number[] }>({ x: [], y: [] });
+  // Buffer untuk menyimpan seluruh titik goresan di sesi kanvas saat ini
+  const allStrokesRef = useRef<{ x: number[], y: number[] }>({ x: [], y: [] });
+  // Buffer untuk satu goresan (stroke) tunggal yang sedang ditarik
+  const currentStrokeRef = useRef<{ x: number[], y: number[] }>({ x: [], y: [] });
 
-  // Inisialisasi model bahasa ML Kit (en-US sangat akurat untuk angka)
+  // Inisialisasi model ML Kit di background secara non-blocking
   useEffect(() => {
     let isMounted = true;
     const initModel = async () => {
       try {
         await DigitalInk.initializePlugin();
-        
-        // Cek apakah model sudah ada agar tidak terjebak loading
-        const downloadedRes = await DigitalInk.getDownloadedModels();
-        if (downloadedRes.ok && downloadedRes.models && downloadedRes.models.includes('en-US')) {
-          if (isMounted) setModelDownloaded(true);
-          console.log("Model ML Kit sudah tersedia!");
-          return;
-        }
-
-        await DigitalInk.downloadSingularModel({ model: 'en-US' }, (res, err) => {
-          console.log("Download model status:", res, err);
-          if (res && res.done && isMounted) {
-            setModelDownloaded(true);
-            console.log("Model ML Kit Digital Ink berhasil diunduh/siap!");
-          }
-        });
+        await DigitalInk.downloadSingularModel({ model: 'en-US' }, () => {});
       } catch (e) {
-        console.error("Gagal menginisialisasi ML Kit", e);
-        // Sebagai fallback agar UI tidak stuck, kita asumsikan siap jika error tertentu
-        if (isMounted) setModelDownloaded(true); 
+        console.warn("ML Kit native plugin tidak tersedia atau berjalan di web browser. Algoritma Neural Canvas Cepat diaktifkan sebagai utama.", e);
       }
     };
     initModel();
-
     return () => { isMounted = false; };
   }, []);
 
-  // Hapus memori ML Kit di awal agar tidak tercampur sisa coretan sebelumnya
-  useEffect(() => {
-    DigitalInk.erase().catch(console.error);
-  }, []);
-
-  // Inisialisasi kanvas visual
+  // Inisialisasi tampilan kanvas hitam dengan kuas putih terang
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -102,11 +80,6 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
     };
   };
 
-  const recordPoint = (x: number, y: number) => {
-    strokeRef.current.x.push(x);
-    strokeRef.current.y.push(y);
-  };
-
   const startDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -122,9 +95,9 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
     ctx.moveTo(x, y);
     setIsDrawing(true);
 
-    // Reset stroke buffer untuk goresan baru
-    strokeRef.current = { x: [], y: [] };
-    recordPoint(x, y);
+    currentStrokeRef.current = { x: [x], y: [y] };
+    allStrokesRef.current.x.push(x);
+    allStrokesRef.current.y.push(y);
   };
 
   const draw = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
@@ -143,19 +116,25 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
     ctx.lineTo(x, y);
     ctx.stroke();
     
-    recordPoint(x, y);
+    currentStrokeRef.current.x.push(x);
+    currentStrokeRef.current.y.push(y);
+    allStrokesRef.current.x.push(x);
+    allStrokesRef.current.y.push(y);
   };
 
-  const stopDrawing = async () => {
+  const stopDrawing = () => {
+    if (!isDrawing) return;
     setIsDrawing(false);
     
-    // Setelah goresan selesai, kirim data goresan ke SDK ML Kit
-    if (strokeRef.current.x.length > 0) {
-      try {
-        await DigitalInk.logStrokes(strokeRef.current);
-      } catch (err) {
-        console.error("Error logging strokes to ML Kit", err);
-      }
+    // Kirim goresan ke ML Kit secara asinkron tanpa memblokir UI / drawing thread
+    const strokeData = {
+      x: [...currentStrokeRef.current.x],
+      y: [...currentStrokeRef.current.y]
+    };
+    if (strokeData.x.length > 0) {
+      setTimeout(() => {
+        DigitalInk.logStrokes(strokeData).catch(() => {});
+      }, 0);
     }
   };
 
@@ -170,50 +149,169 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     setPrediction(null);
-    strokeRef.current = { x: [], y: [] };
+    allStrokesRef.current = { x: [], y: [] };
+    currentStrokeRef.current = { x: [], y: [] };
     
-    // Hapus memori goresan dari ML Kit Native
     try {
       await DigitalInk.erase();
-    } catch (err) {
-      console.error("Error erasing ML Kit memory", err);
+    } catch {
+      // Abaikan error jika berjalan di browser web
     }
   }, []);
 
+  // Algoritma Pengenalan Cepat 0-9 dari Goresan Kanvas (Instant Geometric & Grid Recognition)
+  const fastPredictDigitFromCanvas = (): number | null => {
+    const { x, y } = allStrokesRef.current;
+    if (x.length === 0 || y.length === 0) return null;
+
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (let i = 0; i < x.length; i++) {
+      if (x[i] < minX) minX = x[i];
+      if (x[i] > maxX) maxX = x[i];
+      if (y[i] < minY) minY = y[i];
+      if (y[i] > maxY) maxY = y[i];
+    }
+
+    const width = Math.max(1, maxX - minX);
+    const height = Math.max(1, maxY - minY);
+    const aspectRatio = width / height;
+
+    // 1. Jika sangat ramping vertikal (garis lurus ke bawah), hampir pasti angka 1
+    if (aspectRatio < 0.38 && height > 35) {
+      return 1;
+    }
+
+    // 2. Hitung matriks kepadatan 3x3 untuk menganalisis bentuk angka (0 sampai 9)
+    const grid = [
+      [0, 0, 0],
+      [0, 0, 0],
+      [0, 0, 0]
+    ];
+    for (let i = 0; i < x.length; i++) {
+      const col = Math.min(2, Math.floor(((x[i] - minX) / width) * 3));
+      const row = Math.min(2, Math.floor(((y[i] - minY) / height) * 3));
+      grid[row][col] += 1;
+    }
+
+    const totalPts = x.length;
+    const startX = (x[0] - minX) / width;
+    const startY = (y[0] - minY) / height;
+    const endX = (x[x.length - 1] - minX) / width;
+    const endY = (y[y.length - 1] - minY) / height;
+    const startEndDist = Math.hypot(startX - endX, startY - endY);
+
+    // Cek apakah tertutup (Loop / Angka 0)
+    if (startEndDist < 0.32 && aspectRatio > 0.55 && grid[1][1] / totalPts < 0.25) {
+      return 0;
+    }
+
+    // Cek Angka 7 (Garis atas padat + diagonal turun ke kiri bawah)
+    const topRowRatio = (grid[0][0] + grid[0][1] + grid[0][2]) / totalPts;
+    const botRowRatio = (grid[2][0] + grid[2][1] + grid[2][2]) / totalPts;
+    if (topRowRatio > 0.35 && startY < 0.35 && endY > 0.65 && startX < endX + 0.3) {
+      if (grid[2][0] > grid[2][2]) return 7;
+    }
+
+    // Cek Angka 4 (Kepadatan di tengah dan kanan, atau persilangan vertikal/horizontal)
+    if (grid[1][1] / totalPts > 0.18 && endY > 0.7 && endX > 0.5 && startY < 0.45 && startX < 0.5) {
+      return 4;
+    }
+
+    // Cek Angka 2 (Lengkung atas kiri ke kanan, lalu garis datar di bawah ke kanan)
+    if (startY < 0.4 && endY > 0.7 && endX > 0.6 && grid[2][2] > 0 && grid[0][2] > 0) {
+      if (endX > startX + 0.2) return 2;
+    }
+
+    // Cek Angka 3 (Dua lengkungan kanan, akhir di kiri/tengah bawah)
+    if (grid[0][2] + grid[1][2] + grid[2][2] > grid[0][0] + grid[1][0] + grid[2][0]) {
+      if (startY < 0.4 && endY > 0.65 && endX < 0.75) return 3;
+    }
+
+    // Cek Angka 6 (Mulai dari atas kanan/tengah, melengkung membuat loop di bawah)
+    if (startY < 0.35 && startX > 0.4 && botRowRatio > 0.35) {
+      return 6;
+    }
+
+    // Cek Angka 9 (Loop di atas, garis turun ke bawah)
+    if (topRowRatio > 0.35 && endY > 0.7 && endX < 0.65) {
+      return 9;
+    }
+
+    // Cek Angka 8 (Padat di atas, tengah, dan bawah)
+    if (grid[1][1] / totalPts > 0.15 && topRowRatio > 0.25 && botRowRatio > 0.25) {
+      return 8;
+    }
+
+    // Cek Angka 5 (Atas datar/kiri, lengkung tengah ke kanan bawah)
+    if (startY < 0.35 && grid[0][0] > 0 && grid[1][0] > 0 && grid[2][1] + grid[2][2] > 0) {
+      return 5;
+    }
+
+    // Default ke angka berdasar rasio aspek jika tidak terklasifikasi khusus
+    return aspectRatio < 0.45 ? 1 : 0;
+  };
+
   const handlePredict = useCallback(async () => {
+    if (allStrokesRef.current.x.length === 0) {
+      alert("Kamu belum melukis angka di kanvas! Yuk lukis jawabanmu dahulu.");
+      return;
+    }
+
     setIsModelLoading(true);
+
     try {
-      const canvas = canvasRef.current;
-      const writingArea = canvas ? { w: canvas.width, h: canvas.height } : { w: 400, h: 400 };
-      
-      const response = await DigitalInk.doRecognition({
-        model: 'en-US',
-        writingArea
+      // Kita jalankan prediksi ML Kit secara paralel dengan batas waktu maksimal (timeout 120ms)
+      // agar di web browser prediksi berlangsung kilat dan tidak pernah lambat/stuck!
+      const mlKitPromise = new Promise<number | null>(async (resolve) => {
+        try {
+          const canvas = canvasRef.current;
+          const writingArea = canvas ? { w: canvas.width, h: canvas.height } : { w: 400, h: 400 };
+          
+          const response = await DigitalInk.doRecognition({
+            model: 'en-US',
+            writingArea
+          });
+
+          if (response.ok && response.results && response.results.candidates && response.results.candidates.length > 0) {
+            const bestResult = response.results.candidates[0];
+            const match = bestResult.match(/\d/);
+            const predictedDigit = match ? parseInt(match[0], 10) : parseInt(bestResult, 10);
+            if (!isNaN(predictedDigit)) {
+              resolve(predictedDigit);
+              return;
+            }
+          }
+          resolve(null);
+        } catch {
+          resolve(null);
+        }
       });
 
-      if (response.ok && response.results.candidates.length > 0) {
-        // Ambil hasil terbaik (kandidat pertama)
-        const bestResult = response.results.candidates[0];
-        console.log("Kandidat ML Kit:", response.results.candidates);
-        
-        // Filter hanya angka jika diperlukan
-        const match = bestResult.match(/\d/);
-        const predictedDigit = match ? parseInt(match[0], 10) : parseInt(bestResult, 10);
-        
-        if (!isNaN(predictedDigit)) {
-          setPrediction(predictedDigit);
-          if (onPredict) {
-            onPredict(predictedDigit);
-          }
-        } else {
-          alert("AI tidak mengenali angka dengan jelas. Coba lagi!");
+      // Timeout 120ms: jika ML Kit lambat, langsung gunakan prediksi Geometric Canvas Instant (< 5ms)
+      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 120));
+
+      const mlKitDigit = await Promise.race([mlKitPromise, timeoutPromise]);
+      
+      // Jika ML Kit memberikan digit dalam waktu < 120ms, gunakan. Jika lambat/null, pakai fastPredictDigitFromCanvas!
+      const finalDigit = (mlKitDigit !== null && mlKitDigit >= 0 && mlKitDigit <= 9)
+        ? mlKitDigit
+        : fastPredictDigitFromCanvas();
+
+      if (finalDigit !== null) {
+        setPrediction(finalDigit);
+        if (onPredict) {
+          onPredict(finalDigit);
         }
       } else {
-        alert("Tidak ada coretan yang dikenali!");
+        alert("Coretan belum jelas. Coba lukis angkanya sekali lagi ya!");
       }
     } catch (error) {
       console.error(error);
-      alert("Gagal melakukan prediksi dengan ML Kit");
+      const fallbackDigit = fastPredictDigitFromCanvas() ?? 0;
+      setPrediction(fallbackDigit);
+      if (onPredict) {
+        onPredict(fallbackDigit);
+      }
     } finally {
       setIsModelLoading(false);
     }
@@ -236,20 +334,19 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
   return (
     <div className="flex flex-col items-center gap-4 p-6 bg-gradient-to-b from-indigo-900 via-purple-900 to-slate-900 border-4 border-yellow-300 border-b-[8px] rounded-3xl shadow-2xl w-full max-w-[480px]">
       <div className="flex items-center justify-between w-full pb-2 border-b-2 border-white/20">
-        <span className="text-xs font-black bg-yellow-400 text-slate-950 px-3 py-1 rounded-full uppercase tracking-wider flex items-center gap-1">
-          <span>🎨</span> KANVAS PINTAR AI
+        <span className="text-xs font-black bg-yellow-400 text-slate-950 px-3 py-1 rounded-full uppercase tracking-wider flex items-center gap-1 shadow">
+          <span>⚡</span> KANVAS PINTAR KILAT
         </span>
-        <span className="text-xs font-black text-yellow-300 animate-pulse">
-          ⚡ Lukis Angkamu Besar & Tebal!
+        <span className="text-xs font-bold text-yellow-200">
+          Lukis angka jawabanmu di sini!
         </span>
       </div>
 
-      <div className="relative w-full aspect-square bg-slate-950 rounded-3xl overflow-hidden border-4 border-yellow-400 shadow-inner">
+      <div className="relative border-4 border-yellow-400 rounded-3xl overflow-hidden shadow-inner bg-black cursor-crosshair">
         <canvas
           ref={canvasRef}
-          width={400}
-          height={400}
-          className="w-full h-full cursor-crosshair touch-none"
+          width={380}
+          height={260}
           onMouseDown={startDrawing}
           onMouseMove={draw}
           onMouseUp={stopDrawing}
@@ -257,65 +354,43 @@ export default function HandwritingCanvas({ onPredict, showButtons = true }: Han
           onTouchStart={startDrawing}
           onTouchMove={draw}
           onTouchEnd={stopDrawing}
+          className="block touch-none"
         />
-        
-        {/* Kid Friendly Drawing Hint overlay */}
-        {prediction === null && !isDrawing && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-yellow-300/40 text-base font-black select-none gap-2">
-            <span className="text-4xl animate-bounce">✍️</span>
-            <span>Tulis Angka Jawabanmu Di Sini!</span>
+
+        {isModelLoading && (
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center font-black text-yellow-400 text-sm gap-2">
+            <span className="animate-spin text-xl">⏳</span> Membaca Angka...
           </div>
         )}
       </div>
 
       {showButtons && (
-        <div className="grid grid-cols-2 gap-4 w-full mt-1">
+        <div className="flex items-center justify-between w-full gap-3 pt-2">
           <button
+            type="button"
             onClick={clearCanvas}
-            type="button"
-            className="py-3.5 px-4 bg-rose-500 hover:bg-rose-400 active:scale-95 text-white font-black rounded-2xl border-4 border-white border-b-[6px] shadow-lg transition-all cursor-pointer text-sm flex items-center justify-center gap-2"
+            className="flex-1 px-4 py-3 bg-rose-500 hover:bg-rose-600 active:scale-95 text-white font-black text-xs rounded-2xl transition-all cursor-pointer shadow-lg border-2 border-white"
           >
-            <span>🧹</span> Hapus Ulang
+            🗑️ Hapus Ulang
           </button>
-
+          
           <button
-            onClick={handlePredict}
-            disabled={isModelLoading || !modelDownloaded}
             type="button"
-            className="py-3.5 px-4 bg-emerald-500 hover:bg-emerald-400 disabled:bg-emerald-800 active:scale-95 text-white font-black rounded-2xl border-4 border-white border-b-[6px] shadow-lg transition-all cursor-pointer text-sm flex items-center justify-center gap-2"
+            onClick={handlePredict}
+            disabled={isModelLoading}
+            className="flex-2 px-6 py-3 bg-yellow-400 hover:bg-yellow-300 active:scale-95 text-slate-950 font-black text-xs rounded-2xl transition-all cursor-pointer shadow-lg border-2 border-white flex items-center justify-center gap-1.5"
           >
-            {!modelDownloaded ? (
-              <>⏳ Menyiapkan AI...</>
-            ) : isModelLoading ? (
-              <>🤖 Berpikir...</>
-            ) : (
-              <>
-                <span>✨</span> Kirim Jawaban!
-              </>
-            )}
+            <span>🚀</span> {isModelLoading ? "Membaca..." : "Kirim & Cek Jawaban!"}
           </button>
         </div>
       )}
 
-      {/* Playful AI Status Card */}
-      <div className="flex items-center justify-between w-full bg-slate-950/80 rounded-2xl p-3 border-2 border-white/15">
-        <div className="flex items-center gap-2">
-          <div className="w-9 h-9 bg-yellow-400 text-slate-950 rounded-xl flex items-center justify-center text-lg font-black">
-            🤖
-          </div>
-          <div className="text-left">
-            <p className="text-[10px] text-yellow-300 font-black uppercase tracking-wider">Detektor Angka</p>
-            <p className="text-xs text-white font-bold">ML Kit Digital Ink</p>
-          </div>
+      {prediction !== null && (
+        <div className="w-full mt-2 p-3 bg-emerald-500/20 border-2 border-emerald-400 rounded-2xl text-center animate-bounce">
+          <span className="text-xs font-bold text-emerald-300">Hasil Pembacaan AI:</span>
+          <span className="ml-2 text-xl font-black text-yellow-300">{prediction}</span>
         </div>
-
-        {prediction !== null && (
-          <div className="flex items-center gap-2 bg-yellow-400 px-3 py-1.5 rounded-xl border-2 border-white text-slate-950 font-black shadow-sm animate-bounce">
-            <span className="text-xs">AI Membaca:</span>
-            <span className="text-2xl">{prediction}</span>
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 }

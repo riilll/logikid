@@ -19,8 +19,14 @@ export default function Login() {
   const [success, setSuccess] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Check if already logged in, redirect to profile/role selector
+  // Check query mode and if already logged in
   useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const m = params.get("mode");
+      if (m === "register") setMode("register");
+      else if (m === "login") setMode("login");
+    }
     const activeUser = db.getActiveUser();
     if (activeUser) {
       router.push("/pilih-profil");
